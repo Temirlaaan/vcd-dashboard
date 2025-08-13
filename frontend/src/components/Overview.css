@@ -1,0 +1,178 @@
+.overview-container {
+  padding: 10px;
+}
+
+.section-title {
+  font-size: 24px;
+  color: #333;
+  margin-bottom: 25px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.overview-grid {
+  display: grid;
+  gap: 25px;
+}
+
+.chart-section {
+  background: #f9f9f9;
+  padding: 20px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+.chart-section h3 {
+  font-size: 18px;
+  color: #555;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.clouds-section {
+  display: grid;
+  gap: 20px;
+}
+
+.cloud-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 20px;
+  transition: all 0.3s ease;
+}
+
+.cloud-card:hover {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.cloud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.cloud-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cloud-icon {
+  width: 24px;
+  height: 24px;
+  color: #667eea;
+}
+
+.cloud-title h3 {
+  font-size: 20px;
+  color: #333;
+  margin: 0;
+}
+
+.cloud-stats {
+  display: flex;
+  gap: 25px;
+}
+
+.cloud-stat {
+  text-align: center;
+}
+
+.stat-number {
+  display: block;
+  font-size: 24px;
+  font-weight: bold;
+  color: #667eea;
+}
+
+.stat-label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.pools-list {
+  display: grid;
+  gap: 15px;
+}
+
+.pool-item {
+  background: #f9f9f9;
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.pool-info {
+  margin-bottom: 10px;
+}
+
+.pool-name {
+  font-weight: 600;
+  color: #333;
+  font-size: 14px;
+}
+
+.pool-network {
+  font-family: monospace;
+  color: #666;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.pool-usage {
+  margin-top: 10px;
+}
+
+.usage-bar {
+  height: 24px;
+  background: #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.usage-fill {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.5s ease;
+  border-radius: 12px;
+}
+
+.usage-fill.usage-low {
+  background: linear-gradient(90deg, #34d399, #059669);
+}
+
+.usage-fill.usage-medium {
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+
+.usage-fill.usage-high {
+  background: linear-gradient(90deg, #f87171, #dc2626);
+}
+
+.usage-text {
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.usage-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #666;
+}
+
+.free-count {
+  color: #059669;
+  font-weight: 600;
+}

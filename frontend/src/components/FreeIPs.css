@@ -1,0 +1,225 @@
+.free-ips-container {
+  padding: 10px;
+}
+
+.section-title {
+  font-size: 24px;
+  color: #333;
+  margin-bottom: 25px;
+}
+
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.summary-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.summary-value {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+.summary-label {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.pools-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.pool-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.pool-card:hover {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.pool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background: #f9f9f9;
+  cursor: pointer;
+}
+
+.pool-info {
+  flex: 1;
+}
+
+.pool-cloud {
+  font-size: 11px;
+  color: #667eea;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.pool-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 3px;
+}
+
+.pool-network {
+  font-family: monospace;
+  font-size: 13px;
+  color: #666;
+}
+
+.pool-stats {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.free-count {
+  font-size: 18px;
+  font-weight: bold;
+  color: #059669;
+}
+
+.expand-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.expand-button:hover {
+  background: #f0f0f0;
+}
+
+.expand-button svg {
+  width: 18px;
+  height: 18px;
+  color: #666;
+}
+
+.pool-content {
+  padding: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.pool-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.copy-all-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-all-button:hover {
+  background: #5a67d8;
+}
+
+.ip-count {
+  font-size: 13px;
+  color: #666;
+}
+
+.ip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.ip-item {
+  font-family: monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ip-item:hover {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.ip-item.copied {
+  background: #059669;
+  color: white;
+  border-color: #059669;
+}
+
+.copied-icon {
+  color: white;
+}
+
+.more-ips {
+  margin-top: 15px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Scrollbar styling */
+.ip-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ip-grid::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.ip-grid::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.ip-grid::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
