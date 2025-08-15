@@ -14,6 +14,7 @@ http.client._MAXHEADERS = 1000
 
 from vcd_client import VCDClient
 from ip_calculator import IPCalculator
+# from ip_search import IPSearchTool  # Раскомментируйте, если создадите файл ip_search.py
 from models import DashboardData, CloudStats, IPPool, IPAllocation
 
 # Настройка логирования
@@ -92,12 +93,6 @@ CLOUDS_CONFIG = {
                 "id": "urn:vcloud:network:2e11613a-8f32-41b6-9b76-6d3ff9e412e0",
                 "name": "ExtNet-176.98.235.0m25-INTERNET",
                 "network": "176.98.235.0/25",
-                "type": "externalNetwork"
-            },
-            {
-                "id": "urn:vcloud:network:41dc5ea7-043a-4f78-b530-98641393fa90",
-                "name": "ExtNet-91.185.28.128m26-INTERNET-AST",
-                "network": "91.185.28.128/26",
                 "type": "externalNetwork"
             },
             {
@@ -379,3 +374,114 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("EXPORTER_PORT", 8000)))
+
+# Раскомментируйте эти endpoints если создадите файл ip_search.py
+"""
+@app.get("/api/search-ip/{ip_address}")
+async def search_ip_address(ip_address: str, cloud_name: str = None):
+    # Поиск IP-адреса во всех местах VCD
+    try:
+        all_results = {}
+        clouds_to_search = [cloud_name] if cloud_name and cloud_name in CLOUDS_CONFIG else CLOUDS_CONFIG.keys()
+        
+        for cloud in clouds_to_search:
+            if cloud not in vcd_clients:
+                continue
+                
+            config = CLOUDS_CONFIG[cloud]
+            searcher = IPSearchTool(
+                base_url=config["url"],
+                api_version=config["api_version"],
+                api_token=config["api_token"]
+            )
+            
+            logger.info(f"Searching for IP {ip_address} in {cloud}")
+            results = searcher.search_ip_comprehensive(ip_address)
+            
+            # Фильтруем пустые результаты
+            filtered_results = {
+                key: value for key, value in results.items() 
+                if value and len(value) > 0
+            }
+            
+            if filtered_results:
+                all_results[cloud] = filtered_results
+        
+        # Формируем итоговый отчет
+        total_found = sum(
+            len(items) 
+            for cloud_results in all_results.values() 
+            for items in cloud_results.values()
+        )
+        
+        return {
+            "searched_ip": ip_address,
+            "total_occurrences": total_found,
+            "clouds_searched": clouds_to_search,
+            "timestamp": datetime.now().isoformat(),
+            "results": all_results,
+            "summary": {
+                cloud: {
+                    location: len(items) 
+                    for location, items in cloud_results.items()
+                }
+                for cloud, cloud_results in all_results.items()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching IP {ip_address}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/check-duplicate-ips")
+async def check_duplicate_ips():
+    # Проверка на дублирующиеся IP-адреса между облаками
+    try:
+        all_ips = {}
+        duplicates = []
+        
+        # Собираем все IP из всех облаков
+        for cloud_name, client in vcd_clients.items():
+            config = CLOUDS_CONFIG[cloud_name]
+            allocations = client.get_all_used_ips(config["pools"])
+            
+            for alloc in allocations:
+                ip = alloc.ip_address
+                if ip not in all_ips:
+                    all_ips[ip] = []
+                all_ips[ip].append({
+                    "cloud": cloud_name,
+                    "org": alloc.org_name,
+                    "pool": alloc.pool_name,
+                    "type": alloc.allocation_type,
+                    "entity": alloc.entity_name
+                })
+        
+        # Находим дубликаты
+        for ip, locations in all_ips.items():
+            if len(locations) > 1:
+                # Проверяем, действительно ли это дубликат (разные облака или разные организации)
+                clouds = set(loc["cloud"] for loc in locations)
+                orgs = set(loc["org"] for loc in locations)
+                
+                if len(clouds) > 1 or len(orgs) > 1:
+                    duplicates.append({
+                        "ip_address": ip,
+                        "occurrence_count": len(locations),
+                        "locations": locations,
+                        "clouds": list(clouds),
+                        "organizations": list(orgs)
+                    })
+        
+        return {
+            "total_unique_ips": len(all_ips),
+            "duplicate_count": len(duplicates),
+            "duplicates": sorted(duplicates, key=lambda x: x["occurrence_count"], reverse=True),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking duplicate IPs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+"""
+ 

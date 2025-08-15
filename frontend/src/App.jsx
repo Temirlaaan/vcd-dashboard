@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
-import Dashboard from './components/Dashboard';
+import Sidebar from './components/Sidebar';
 import StatsCards from './components/StatsCards';
-import TabNavigation from './components/TabNavigation';
 import Overview from './components/Overview';
 import AllocatedIPs from './components/AllocatedIPs';
 import FreeIPs from './components/FreeIPs';
 import PoolDetails from './components/PoolDetails';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
-import { RefreshCw, Cloud } from 'lucide-react';
+import { RefreshCw, Menu, X } from 'lucide-react';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -20,6 +19,8 @@ function App() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [refreshing, setRefreshing] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const loadDashboardData = async () => {
     try {
@@ -47,6 +48,11 @@ function App() {
     loadDashboardData();
   };
 
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
@@ -72,45 +78,64 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <div className="header-content">
-          <div className="header-title">
-            <Cloud className="header-icon" />
-            <div>
-              <h1>VCD IP Manager</h1>
-              <p className="header-subtitle">VMware vCloud Director - IP Address Management</p>
+      {/* Mobile menu overlay */}
+      {mobileMenuOpen && (
+        <div className="mobile-overlay" onClick={() => setMobileMenuOpen(false)} />
+      )}
+
+      {/* Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        mobileMenuOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+      />
+
+      {/* Main Content */}
+      <div className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        {/* Header */}
+        <header className="app-header">
+          <div className="header-left">
+            <button 
+              className="mobile-menu-toggle"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            >
+              {mobileMenuOpen ? <X /> : <Menu />}
+            </button>
+            <div className="header-title">
+              <h1>IP Address Management</h1>
+              <p className="header-subtitle">VMware vCloud Director</p>
             </div>
           </div>
-          <button 
-            className={`refresh-button ${refreshing ? 'refreshing' : ''}`}
-            onClick={handleRefresh}
-            disabled={refreshing}
-          >
-            <RefreshCw className={`refresh-icon ${refreshing ? 'spinning' : ''}`} />
-            {refreshing ? 'Refreshing...' : 'Refresh Data'}
-          </button>
-        </div>
-      </header>
-
-      <div className="app-content">
-        {dashboardData && (
-          <>
-            <StatsCards data={dashboardData} />
-            <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
-            <div className="tab-content">
-              {renderContent()}
+          <div className="header-right">
+            <div className="last-update">
+              Last updated: {new Date(dashboardData.last_update).toLocaleTimeString()}
             </div>
-          </>
-        )}
-      </div>
+            <button 
+              className={`refresh-button ${refreshing ? 'refreshing' : ''}`}
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`refresh-icon ${refreshing ? 'spinning' : ''}`} />
+              <span className="refresh-text">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+            </button>
+          </div>
+        </header>
 
-      {dashboardData && (
-        <footer className="app-footer">
-          <span>Last updated: {new Date(dashboardData.last_update).toLocaleString()}</span>
-          <span>•</span>
-          <span>{dashboardData.total_clouds} clouds monitored</span>
-        </footer>
-      )}
+        {/* Content Area */}
+        <div className="content-wrapper">
+          {dashboardData && (
+            <>
+              <StatsCards data={dashboardData} />
+              <div className="main-card">
+                {renderContent()}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -167,9 +167,18 @@ const AllocatedIPs = ({ data }) => {
                 </td>
                 <td>{allocation.pool_name}</td>
                 <td>
-                  <span className="type-badge">{allocation.allocation_type}</span>
+                  <span className={`type-badge type-${allocation.allocation_type.toLowerCase()}`}>
+                    {allocation.allocation_type}
+                  </span>
                 </td>
-                <td>{allocation.entity_name || '-'}</td>
+                <td>
+                  {allocation.entity_name || '-'}
+                  {allocation.allocation_type === 'VM_ALLOCATED' && allocation.vapp_name && (
+                    <div className="entity-details">
+                      <small>vApp: {allocation.vapp_name}</small>
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -8,10 +8,13 @@ class IPAllocation(BaseModel):
     org_name: str
     org_id: Optional[str] = None
     entity_name: Optional[str] = None
-    allocation_type: str  # FLOATING_IP, EDGE, etc.
+    allocation_type: str  # FLOATING_IP, EDGE, VM_ALLOCATED, NAT, etc.
     cloud_name: str  # vcd, vcd01, vcd02
     pool_name: str
     allocation_date: Optional[datetime] = None
+    # Дополнительные поля для VM
+    vapp_name: Optional[str] = None
+    deployed: Optional[bool] = None
 
 class IPPool(BaseModel):
     """Модель для пула IP адресов"""
