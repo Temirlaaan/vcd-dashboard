@@ -27,7 +27,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
 
   frontend:
     build:
@@ -36,15 +35,13 @@ services:
     container_name: vcd-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80"  # Только HTTP порт
     depends_on:
       - backend
     networks:
       - vcd-network
     volumes:
       - ./nginx/logs:/var/log/nginx
-      - ./ssl:/etc/nginx/ssl:ro  # Для SSL сертификатов
 
 networks:
   vcd-network:
