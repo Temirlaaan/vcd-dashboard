@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vcd-backend
+    restart: unless-stopped
+    environment:
+      - VCD_URL=${VCD_URL}
+      - VCD_API_VERSION=${VCD_API_VERSION}
+      - VCD_API_TOKEN=${VCD_API_TOKEN}
+      - VCD_URL_VCD01=${VCD_URL_VCD01}
+      - VCD_API_VERSION_VCD01=${VCD_API_VERSION_VCD01}
+      - VCD_API_TOKEN_VCD01=${VCD_API_TOKEN_VCD01}
+      - VCD_URL_VCD02=${VCD_URL_VCD02}
+      - VCD_API_VERSION_VCD02=${VCD_API_VERSION_VCD02}
+      - VCD_API_TOKEN_VCD02=${VCD_API_TOKEN_VCD02}
+      - EXPORTER_PORT=8000
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - vcd-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vcd-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - vcd-network
+    volumes:
+      - ./nginx/logs:/var/log/nginx
+      - ./ssl:/etc/nginx/ssl:ro  # Для SSL сертификатов
+
+networks:
+  vcd-network:
+    driver: bridge

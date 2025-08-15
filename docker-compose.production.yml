@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vcd-backend
+    restart: always
+    environment:
+      - VCD_URL=${VCD_URL}
+      - VCD_API_VERSION=${VCD_API_VERSION}
+      - VCD_API_TOKEN=${VCD_API_TOKEN}
+      - VCD_URL_VCD01=${VCD_URL_VCD01}
+      - VCD_API_VERSION_VCD01=${VCD_API_VERSION_VCD01}
+      - VCD_API_TOKEN_VCD01=${VCD_API_TOKEN_VCD01}
+      - VCD_URL_VCD02=${VCD_URL_VCD02}
+      - VCD_API_VERSION_VCD02=${VCD_API_VERSION_VCD02}
+      - VCD_API_TOKEN_VCD02=${VCD_API_TOKEN_VCD02}
+      - EXPORTER_PORT=8000
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - vcd-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=/api
+    container_name: vcd-frontend
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - vcd-network
+    volumes:
+      - ./nginx/logs:/var/log/nginx
+      - ./ssl:/etc/nginx/ssl:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Опциональный Nginx для reverse proxy (если нужен отдельный)
+  nginx:
+    image: nginx:alpine
+    container_name: vcd-nginx
+    restart: always
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - vcd-network
+
+networks:
+  vcd-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
