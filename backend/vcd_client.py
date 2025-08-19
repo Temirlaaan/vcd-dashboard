@@ -45,11 +45,11 @@ class VCDClient:
         # Кэш для данных
         self.cache = TTLCache(maxsize=100, ttl=300)  # 5 минут кэш
     
-    def get_bearer_token(self) -> str:
+    def get_bearer_token(self, force_refresh: bool = False) -> str:
         """Получить или обновить Bearer токен"""
         with self.token_lock:
             now = time.time()
-            if self.token_cache['token'] is None or now >= self.token_cache['expires_at'] - 300:
+            if force_refresh or self.token_cache['token'] is None or now >= self.token_cache['expires_at'] - 300:
                 parts = urlparse(self.base_url)
                 token_url = f"{parts.scheme}://{parts.netloc}/oauth/provider/token"
                 
@@ -78,6 +78,23 @@ class VCDClient:
             'Authorization': f'Bearer {self.get_bearer_token()}'
         }
     
+    def make_request(self, url: str, retry_on_401: bool = True) -> Optional[requests.Response]:
+        """Выполнить запрос с обработкой 401 ошибки"""
+        try:
+            response = self.session.get(url, headers=self.get_headers(), timeout=(10, 30))
+            
+            # Если получили 401 и это первая попытка, обновляем токен
+            if response.status_code == 401 and retry_on_401:
+                logger.warning(f"Got 401 for {self.cloud_name}, refreshing token...")
+                self.get_bearer_token(force_refresh=True)
+                # Рекурсивно вызываем себя, но уже без retry
+                return self.make_request(url, retry_on_401=False)
+            
+            return response
+        except Exception as e:
+            logger.error(f"Request failed for {url}: {e}")
+            return None
+    
     def fetch_ip_space_allocations(self, ip_space_id: str, pool_name: str) -> List[IPAllocation]:
         """Получить занятые IP из IP Space (для vcd v38)"""
         cache_key = f"ipspace_{ip_space_id}"
@@ -85,111 +102,57 @@ class VCDClient:
             return self.cache[cache_key]
         
         allocations = []
-        
-        # Начинаем с первой страницы
-        # Используем pageSize=128 для всех пулов для максимальной эффективности
-        url = f"{self.base_url}/cloudapi/1.0.0/ipSpaces/{ip_space_id}/allocations?filter=(type==FLOATING_IP)&pageSize=128&page=1"
+        page = 1
+        page_size = 128
         
         logger.info(f"Fetching allocations for {pool_name} ({ip_space_id})")
         
-        try:
-            page_count = 0
-            total_fetched = 0
+        while True:
+            url = f"{self.base_url}/cloudapi/1.0.0/ipSpaces/{ip_space_id}/allocations?filter=(type==FLOATING_IP)&pageSize={page_size}&page={page}"
             
-            while url:
-                page_count += 1
-                logger.debug(f"Fetching page {page_count} for {pool_name}")
+            response = self.make_request(url)
+            if not response or response.status_code != 200:
+                if response:
+                    logger.warning(f"Error response for {pool_name}: {response.status_code}")
+                break
+            
+            try:
+                data = response.json()
+                values = data.get('values', [])
                 
-                try:
-                    r = self.session.get(url, headers=self.get_headers(), timeout=(10, 30))
-                    
-                    if r.status_code == 200:
-                        data = r.json()
-                        values = data.get('values', [])
-                        
-                        if not values:
-                            logger.debug(f"No more data on page {page_count} for {pool_name}")
-                            break
-                        
-                        # Обрабатываем все записи на странице
-                        page_items = 0
-                        for alloc in values:
-                            if alloc.get('type') == 'FLOATING_IP':
-                                allocations.append(IPAllocation(
-                                    ip_address=alloc.get('value', 'N/A'),
-                                    org_name=alloc.get('orgRef', {}).get('name', 'unknown'),
-                                    org_id=alloc.get('orgRef', {}).get('id'),
-                                    entity_name=alloc.get('usedByRef', {}).get('name') if alloc.get('usedByRef') else None,
-                                    allocation_type='FLOATING_IP',
-                                    cloud_name=self.cloud_name,
-                                    pool_name=pool_name,
-                                    allocation_date=datetime.fromisoformat(alloc['allocationDate'].replace('+0500', '+05:00')) if alloc.get('allocationDate') else None
-                                ))
-                                page_items += 1
-                        
-                        total_fetched += page_items
-                        logger.debug(f"Page {page_count}: fetched {page_items} items, total so far: {total_fetched}")
-                        
-                        # Проверяем наличие следующей страницы
-                        next_link = data.get('nextPageLink')
-                        if next_link:
-                            url = next_link
-                            logger.debug(f"Next page link found: {next_link}")
-                        else:
-                            # Проверяем, есть ли еще данные через результаты страницы
-                            result_total = data.get('resultTotal', 0)
-                            page_size = data.get('pageSize', 128)
-                            current_page = data.get('page', page_count)
-                            
-                            if result_total > 0 and (current_page * page_size) < result_total:
-                                # Есть еще страницы, формируем URL для следующей
-                                next_page = current_page + 1
-                                url = f"{self.base_url}/cloudapi/1.0.0/ipSpaces/{ip_space_id}/allocations?filter=(type==FLOATING_IP)&pageSize={page_size}&page={next_page}"
-                                logger.debug(f"Constructed next page URL: page {next_page}")
-                            else:
-                                logger.debug(f"No more pages. Result total: {result_total}, fetched: {total_fetched}")
-                                url = None
-                    else:
-                        logger.warning(f"Error response for {pool_name}: {r.status_code}")
-                        if r.text:
-                            logger.debug(f"Response text: {r.text[:500]}")
-                        break
-                        
-                except requests.exceptions.Timeout:
-                    logger.warning(f"Timeout on page {page_count} for {pool_name}, retrying with smaller page size")
-                    # Пробуем с меньшим размером страницы
-                    if 'pageSize=128' in url:
-                        url = url.replace('pageSize=128', 'pageSize=50')
-                    elif 'pageSize=50' in url:
-                        url = url.replace('pageSize=50', 'pageSize=25')
-                    else:
-                        logger.error(f"Failed after reducing page size for {pool_name}")
-                        break
-                        
-                except Exception as e:
-                    logger.error(f"Error on page {page_count} for {pool_name}: {e}")
-                    
-                    # Особая обработка для ошибки с заголовками
-                    if "got more than 100 headers" in str(e).lower():
-                        logger.info(f"Headers limit error for {pool_name}, reducing page size")
-                        if 'pageSize=128' in url:
-                            url = url.replace('pageSize=128', 'pageSize=25')
-                        elif 'pageSize=50' in url:
-                            url = url.replace('pageSize=50', 'pageSize=10')
-                        else:
-                            break
-                    else:
-                        break
+                if not values:
+                    break
+                
+                for alloc in values:
+                    if alloc.get('type') == 'FLOATING_IP':
+                        allocations.append(IPAllocation(
+                            ip_address=alloc.get('value', 'N/A'),
+                            org_name=alloc.get('orgRef', {}).get('name', 'unknown'),
+                            org_id=alloc.get('orgRef', {}).get('id'),
+                            entity_name=alloc.get('usedByRef', {}).get('name') if alloc.get('usedByRef') else None,
+                            allocation_type='FLOATING_IP',
+                            cloud_name=self.cloud_name,
+                            pool_name=pool_name,
+                            allocation_date=datetime.fromisoformat(alloc['allocationDate'].replace('+0500', '+05:00')) 
+                                          if alloc.get('allocationDate') else None
+                        ))
+                
+                # Проверяем, есть ли еще страницы
+                if len(values) < page_size:
+                    break
+                
+                page += 1
                 
                 # Защита от бесконечного цикла
-                if page_count > 100:
-                    logger.warning(f"Reached maximum page limit (100) for {pool_name}")
+                if page > 100:
+                    logger.warning(f"Reached maximum page limit for {pool_name}")
                     break
                     
-        except Exception as e:
-            logger.error(f"Critical error fetching IP Space {pool_name}: {e}")
+            except Exception as e:
+                logger.error(f"Error processing response for {pool_name}: {e}")
+                break
         
-        logger.info(f"{self.cloud_name}: Found {len(allocations)} IPs in {pool_name} after {page_count} pages")
+        logger.info(f"{self.cloud_name}: Found {len(allocations)} IPs in {pool_name}")
         self.cache[cache_key] = allocations
         return allocations
     
@@ -200,96 +163,75 @@ class VCDClient:
             return self.cache[cache_key]
         
         allocations = []
+        page = 1
+        page_size = 128
         
         logger.info(f"Fetching used IPs for {pool_name} ({network_id})")
         
-        try:
-            page = 1
-            total_fetched = 0
+        while True:
+            url = f"{self.base_url}/cloudapi/1.0.0/externalNetworks/{network_id}/usedIpAddresses?pageSize={page_size}&page={page}"
             
-            while True:
-                url = f"{self.base_url}/cloudapi/1.0.0/externalNetworks/{network_id}/usedIpAddresses?pageSize=128&page={page}"
-                logger.debug(f"Fetching page {page} for {pool_name}")
+            response = self.make_request(url)
+            if not response or response.status_code != 200:
+                if response:
+                    logger.warning(f"Error fetching page {page} for {pool_name}: {response.status_code}")
+                break
+            
+            try:
+                data = response.json()
                 
-                r = self.session.get(url, headers=self.get_headers(), timeout=(5, 30))
-                
-                if r.status_code == 200:
-                    data = r.json()
-                    
-                    # Данные могут быть как list так и dict с values
-                    if isinstance(data, dict):
-                        items = data.get('values', [])
-                        result_total = data.get('resultTotal', 0)
-                    else:
-                        items = data if isinstance(data, list) else []
-                        result_total = len(items)
-                    
-                    if not items:
-                        logger.debug(f"No more data on page {page} for {pool_name}")
-                        break
-                    
-                    page_items = 0
-                    for item in items:
-                        # Обрабатываем разные типы allocation
-                        allocation_type = item.get('allocationType', 'UNKNOWN')
-                        entity_name = None
-                        
-                        # Определяем entity_name в зависимости от типа
-                        if allocation_type == 'VM_ALLOCATED':
-                            entity_name = item.get('entityName') or item.get('vappName')
-                        elif allocation_type == 'EDGE':
-                            entity_name = item.get('entityName')
-                        elif allocation_type == 'NAT':
-                            entity_name = f"NAT on {item.get('entityName', 'Unknown')}"
-                        else:
-                            entity_name = item.get('entityName')
-                        
-                        allocations.append(IPAllocation(
-                            ip_address=item.get('ipAddress', 'N/A'),
-                            org_name=item.get('orgRef', {}).get('name', 'unknown'),
-                            org_id=item.get('orgRef', {}).get('id'),
-                            entity_name=entity_name,
-                            allocation_type=allocation_type,
-                            cloud_name=self.cloud_name,
-                            pool_name=pool_name,
-                            allocation_date=None,  # В v37 нет даты аллокации
-                            vapp_name=item.get('vappName') or item.get('vAppName'),
-                            deployed=item.get('deployed')
-                        ))
-                        page_items += 1
-                    
-                    total_fetched += page_items
-                    logger.debug(f"Page {page}: fetched {page_items} items, total so far: {total_fetched}")
-                    
-                    # Проверяем, есть ли следующая страница
-                    # В API v37 если вернулось меньше pageSize элементов, значит это последняя страница
-                    if len(items) < 128:
-                        logger.debug(f"Last page reached (got {len(items)} items, less than 128)")
-                        break
-                    
-                    # Также проверяем resultTotal если он есть
-                    if isinstance(data, dict) and result_total > 0:
-                        if total_fetched >= result_total:
-                            logger.debug(f"All items fetched: {total_fetched}/{result_total}")
-                            break
-                    
-                    page += 1
-                    
-                    # Защита от бесконечного цикла
-                    if page > 100:
-                        logger.warning(f"Reached maximum page limit (100) for {pool_name}")
-                        break
-                        
+                # Данные могут быть как list так и dict с values
+                if isinstance(data, dict):
+                    items = data.get('values', [])
                 else:
-                    logger.warning(f"Error fetching page {page} for {pool_name}: {r.status_code}")
-                    if r.text:
-                        logger.debug(f"Response: {r.text[:500]}")
+                    items = data if isinstance(data, list) else []
+                
+                if not items:
+                    break
+                
+                for item in items:
+                    allocation_type = item.get('allocationType', 'UNKNOWN')
+                    entity_name = None
+                    
+                    # Определяем entity_name в зависимости от типа
+                    if allocation_type == 'VM_ALLOCATED':
+                        entity_name = item.get('entityName') or item.get('vappName')
+                    elif allocation_type == 'EDGE':
+                        entity_name = item.get('entityName')
+                    elif allocation_type == 'NAT':
+                        entity_name = f"NAT on {item.get('entityName', 'Unknown')}"
+                    else:
+                        entity_name = item.get('entityName')
+                    
+                    allocations.append(IPAllocation(
+                        ip_address=item.get('ipAddress', 'N/A'),
+                        org_name=item.get('orgRef', {}).get('name', 'unknown'),
+                        org_id=item.get('orgRef', {}).get('id'),
+                        entity_name=entity_name,
+                        allocation_type=allocation_type,
+                        cloud_name=self.cloud_name,
+                        pool_name=pool_name,
+                        allocation_date=None,
+                        vapp_name=item.get('vappName') or item.get('vAppName'),
+                        deployed=item.get('deployed')
+                    ))
+                
+                # Проверяем, есть ли следующая страница
+                if len(items) < page_size:
+                    break
+                
+                page += 1
+                
+                # Защита от бесконечного цикла
+                if page > 100:
+                    logger.warning(f"Reached maximum page limit for {pool_name}")
                     break
                     
-        except Exception as e:
-            logger.error(f"Error fetching External Network {pool_name}: {e}")
+            except Exception as e:
+                logger.error(f"Error processing response for {pool_name}: {e}")
+                break
         
-        # Подсчитываем типы аллокаций для логирования
+        # Подсчитываем типы аллокаций
         type_counts = {}
         for alloc in allocations:
             type_counts[alloc.allocation_type] = type_counts.get(alloc.allocation_type, 0) + 1
@@ -312,12 +254,17 @@ class VCDClient:
             
             logger.info(f"Processing pool: {pool_name} (type: {pool_type})")
             
-            if pool_type == 'ipSpace':
-                allocations = self.fetch_ip_space_allocations(pool_id, pool_name)
-            else:  # externalNetwork
-                allocations = self.fetch_external_network_used_ips(pool_id, pool_name)
-            
-            all_allocations.extend(allocations)
+            try:
+                if pool_type == 'ipSpace':
+                    allocations = self.fetch_ip_space_allocations(pool_id, pool_name)
+                else:  # externalNetwork
+                    allocations = self.fetch_external_network_used_ips(pool_id, pool_name)
+                
+                all_allocations.extend(allocations)
+            except Exception as e:
+                logger.error(f"Error processing pool {pool_name}: {e}")
+                # Продолжаем с другими пулами
+                continue
         
         logger.info(f"{self.cloud_name}: Total {len(all_allocations)} IPs across all pools")
         return all_allocations

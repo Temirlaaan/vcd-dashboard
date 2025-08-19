@@ -14,7 +14,6 @@ http.client._MAXHEADERS = 1000
 
 from vcd_client import VCDClient
 from ip_calculator import IPCalculator
-# from ip_search import IPSearchTool  # Раскомментируйте, если создадите файл ip_search.py
 from models import DashboardData, CloudStats, IPPool, IPAllocation
 
 # Настройка логирования
@@ -62,6 +61,12 @@ CLOUDS_CONFIG = {
                 "name": "91.185.21.224/27",
                 "network": "91.185.21.224/27",
                 "type": "ipSpace"
+            },
+            {
+                "id": "urn:vcloud:ipSpace:5f6a1f88-094d-4877-bb9d-ee01d79da29d",
+                "name": "IPS-37.17.178.208/28-internet",
+                "network": "37.17.178.208/28",
+                "type": "ipSpace"
             }
         ]
     },
@@ -73,13 +78,13 @@ CLOUDS_CONFIG = {
             {
                 "id": "urn:vcloud:network:7eecf17f-838d-4348-936d-4099f860e52c",
                 "name": "Internet",
-                "network": "37.208.43.0/24",  # Исправленная сеть
+                "network": "37.208.43.0/24",
                 "type": "externalNetwork"
             },
             {
                 "id": "urn:vcloud:network:516d858b-9549-4352-929b-d75ab300ad00",
                 "name": "ALM01-Internet",
-                "network": "91.185.11.0/24",  # Исправленная сеть
+                "network": "91.185.11.0/24",
                 "type": "externalNetwork"
             }
         ]
@@ -154,60 +159,66 @@ async def get_dashboard_data():
             config = CLOUDS_CONFIG[cloud_name]
             pools = config["pools"]
             
-            # Получаем все занятые IP для этого облака
-            cloud_allocations = client.get_all_used_ips(pools)
-            all_allocations.extend(cloud_allocations)
-            
-            # Группируем занятые IP по пулам
-            cloud_pools = []
-            cloud_total_ips = 0
-            cloud_used_ips = 0
-            cloud_free_ips = 0
-            
-            for pool_config in pools:
-                # Получаем занятые IP для этого пула
-                pool_allocations = [a for a in cloud_allocations if a.pool_name == pool_config["name"]]
-                used_ips_set = set(a.ip_address for a in pool_allocations)
+            try:
+                # Получаем все занятые IP для этого облака
+                cloud_allocations = client.get_all_used_ips(pools)
+                all_allocations.extend(cloud_allocations)
                 
-                # Рассчитываем свободные IP
-                free_ips, total, used, free = IPCalculator.calculate_free_ips(
-                    pool_config["network"],
-                    used_ips_set
-                )
+                # Группируем занятые IP по пулам
+                cloud_pools = []
+                cloud_total_ips = 0
+                cloud_used_ips = 0
+                cloud_free_ips = 0
                 
-                # Создаем объект пула
-                pool = IPPool(
-                    name=pool_config["name"],
-                    network=pool_config["network"],
+                for pool_config in pools:
+                    # Получаем занятые IP для этого пула
+                    pool_allocations = [a for a in cloud_allocations if a.pool_name == pool_config["name"]]
+                    used_ips_set = set(a.ip_address for a in pool_allocations)
+                    
+                    # Рассчитываем свободные IP
+                    free_ips, total, used, free = IPCalculator.calculate_free_ips(
+                        pool_config["network"],
+                        used_ips_set
+                    )
+                    
+                    # Создаем объект пула
+                    pool = IPPool(
+                        name=pool_config["name"],
+                        network=pool_config["network"],
+                        cloud_name=cloud_name,
+                        total_ips=total,
+                        used_ips=used,
+                        free_ips=free,
+                        usage_percentage=round((used / total * 100) if total > 0 else 0, 2),
+                        used_addresses=pool_allocations,
+                        free_addresses=free_ips[:100] if len(free_ips) > 100 else free_ips
+                    )
+                    
+                    cloud_pools.append(pool)
+                    cloud_total_ips += total
+                    cloud_used_ips += used
+                    cloud_free_ips += free
+                
+                # Создаем статистику облака
+                cloud_stats = CloudStats(
                     cloud_name=cloud_name,
-                    total_ips=total,
-                    used_ips=used,
-                    free_ips=free,
-                    usage_percentage=round((used / total * 100) if total > 0 else 0, 2),
-                    used_addresses=pool_allocations,
-                    free_addresses=free_ips[:100] if len(free_ips) > 100 else free_ips  # Ограничиваем для производительности
+                    total_pools=len(pools),
+                    total_ips=cloud_total_ips,
+                    used_ips=cloud_used_ips,
+                    free_ips=cloud_free_ips,
+                    usage_percentage=round((cloud_used_ips / cloud_total_ips * 100) if cloud_total_ips > 0 else 0, 2),
+                    pools=cloud_pools
                 )
                 
-                cloud_pools.append(pool)
-                cloud_total_ips += total
-                cloud_used_ips += used
-                cloud_free_ips += free
-            
-            # Создаем статистику облака
-            cloud_stats = CloudStats(
-                cloud_name=cloud_name,
-                total_pools=len(pools),
-                total_ips=cloud_total_ips,
-                used_ips=cloud_used_ips,
-                free_ips=cloud_free_ips,
-                usage_percentage=round((cloud_used_ips / cloud_total_ips * 100) if cloud_total_ips > 0 else 0, 2),
-                pools=cloud_pools
-            )
-            
-            all_clouds_stats.append(cloud_stats)
-            total_ips_count += cloud_total_ips
-            used_ips_count += cloud_used_ips
-            free_ips_count += cloud_free_ips
+                all_clouds_stats.append(cloud_stats)
+                total_ips_count += cloud_total_ips
+                used_ips_count += cloud_used_ips
+                free_ips_count += cloud_free_ips
+                
+            except Exception as e:
+                logger.error(f"Error processing cloud {cloud_name}: {e}")
+                # Продолжаем с другими облаками даже если одно упало
+                continue
         
         # Формируем итоговый ответ
         dashboard = DashboardData(
@@ -321,7 +332,7 @@ async def get_pool_data(cloud_name: str, pool_name: str):
             free_ips=free,
             usage_percentage=round((used / total * 100) if total > 0 else 0, 2),
             used_addresses=allocations,
-            free_addresses=free_ips_list  # Возвращаем все свободные IP для детального просмотра
+            free_addresses=free_ips_list
         )
         
     except Exception as e:
@@ -374,114 +385,3 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("EXPORTER_PORT", 8000)))
-
-# Раскомментируйте эти endpoints если создадите файл ip_search.py
-"""
-@app.get("/api/search-ip/{ip_address}")
-async def search_ip_address(ip_address: str, cloud_name: str = None):
-    # Поиск IP-адреса во всех местах VCD
-    try:
-        all_results = {}
-        clouds_to_search = [cloud_name] if cloud_name and cloud_name in CLOUDS_CONFIG else CLOUDS_CONFIG.keys()
-        
-        for cloud in clouds_to_search:
-            if cloud not in vcd_clients:
-                continue
-                
-            config = CLOUDS_CONFIG[cloud]
-            searcher = IPSearchTool(
-                base_url=config["url"],
-                api_version=config["api_version"],
-                api_token=config["api_token"]
-            )
-            
-            logger.info(f"Searching for IP {ip_address} in {cloud}")
-            results = searcher.search_ip_comprehensive(ip_address)
-            
-            # Фильтруем пустые результаты
-            filtered_results = {
-                key: value for key, value in results.items() 
-                if value and len(value) > 0
-            }
-            
-            if filtered_results:
-                all_results[cloud] = filtered_results
-        
-        # Формируем итоговый отчет
-        total_found = sum(
-            len(items) 
-            for cloud_results in all_results.values() 
-            for items in cloud_results.values()
-        )
-        
-        return {
-            "searched_ip": ip_address,
-            "total_occurrences": total_found,
-            "clouds_searched": clouds_to_search,
-            "timestamp": datetime.now().isoformat(),
-            "results": all_results,
-            "summary": {
-                cloud: {
-                    location: len(items) 
-                    for location, items in cloud_results.items()
-                }
-                for cloud, cloud_results in all_results.items()
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error searching IP {ip_address}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/check-duplicate-ips")
-async def check_duplicate_ips():
-    # Проверка на дублирующиеся IP-адреса между облаками
-    try:
-        all_ips = {}
-        duplicates = []
-        
-        # Собираем все IP из всех облаков
-        for cloud_name, client in vcd_clients.items():
-            config = CLOUDS_CONFIG[cloud_name]
-            allocations = client.get_all_used_ips(config["pools"])
-            
-            for alloc in allocations:
-                ip = alloc.ip_address
-                if ip not in all_ips:
-                    all_ips[ip] = []
-                all_ips[ip].append({
-                    "cloud": cloud_name,
-                    "org": alloc.org_name,
-                    "pool": alloc.pool_name,
-                    "type": alloc.allocation_type,
-                    "entity": alloc.entity_name
-                })
-        
-        # Находим дубликаты
-        for ip, locations in all_ips.items():
-            if len(locations) > 1:
-                # Проверяем, действительно ли это дубликат (разные облака или разные организации)
-                clouds = set(loc["cloud"] for loc in locations)
-                orgs = set(loc["org"] for loc in locations)
-                
-                if len(clouds) > 1 or len(orgs) > 1:
-                    duplicates.append({
-                        "ip_address": ip,
-                        "occurrence_count": len(locations),
-                        "locations": locations,
-                        "clouds": list(clouds),
-                        "organizations": list(orgs)
-                    })
-        
-        return {
-            "total_unique_ips": len(all_ips),
-            "duplicate_count": len(duplicates),
-            "duplicates": sorted(duplicates, key=lambda x: x["occurrence_count"], reverse=True),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Error checking duplicate IPs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-"""
- 
