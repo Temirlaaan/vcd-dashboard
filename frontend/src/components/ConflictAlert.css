@@ -1,0 +1,227 @@
+/* frontend/src/components/ConflictAlert.css */
+.conflict-alert {
+  background: var(--surface);
+  border: 2px solid var(--danger);
+  border-radius: 12px;
+  margin: 20px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.conflict-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.conflict-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conflict-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--danger);
+}
+
+.conflict-title h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.close-button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-button:hover {
+  background: var(--background);
+  color: var(--text-primary);
+}
+
+.close-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.conflict-description {
+  margin-bottom: 20px;
+}
+
+.conflict-description p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.conflicts-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.conflict-item {
+  background: var(--background);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+}
+
+.conflict-ip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ip-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--primary);
+}
+
+.ip-address {
+  font-family: 'Courier New', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.conflict-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conflict-clouds,
+.conflict-orgs,
+.conflict-pools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.detail-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.label {
+  color: var(--text-secondary);
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.value {
+  color: var(--text-primary);
+}
+
+.cloud-badges {
+  display: flex;
+  gap: 6px;
+}
+
+.cloud-badge {
+  padding: 2px 8px;
+  background: var(--danger);
+  color: white;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.conflict-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.warning-text {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Конфликт индикатор в хедере */
+.conflict-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.conflict-indicator:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.conflict-indicator svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Scrollbar для списка конфликтов */
+.conflicts-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.conflicts-list::-webkit-scrollbar-track {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.conflicts-list::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 3px;
+}
+
+.conflicts-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}

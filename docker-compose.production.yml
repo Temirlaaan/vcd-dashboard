@@ -18,6 +18,7 @@ services:
       - VCD_API_VERSION_VCD02=${VCD_API_VERSION_VCD02}
       - VCD_API_TOKEN_VCD02=${VCD_API_TOKEN_VCD02}
       - EXPORTER_PORT=8000
+      - TZ=Asia/Almaty
     volumes:
       - ./backend/logs:/app/logs
     networks:
@@ -40,6 +41,7 @@ services:
       dockerfile: Dockerfile
       args:
         - REACT_APP_API_URL=/api
+        - REACT_APP_DOMAIN=vcd-public-ips.t-cloud.kz
     container_name: vcd-frontend
     restart: always
     ports:
@@ -51,28 +53,14 @@ services:
       - vcd-network
     volumes:
       - ./nginx/logs:/var/log/nginx
-      - ./ssl:/etc/nginx/ssl:ro
+      - ./ssl:/etc/nginx/ssl:ro  # Монтируем SSL сертификаты
+    environment:
+      - TZ=Asia/Almaty
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-  # Опциональный Nginx для reverse proxy (если нужен отдельный)
-  nginx:
-    image: nginx:alpine
-    container_name: vcd-nginx
-    restart: always
-    ports:
-      - "8080:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/logs:/var/log/nginx
-    depends_on:
-      - frontend
-      - backend
-    networks:
-      - vcd-network
 
 networks:
   vcd-network:

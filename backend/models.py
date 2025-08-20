@@ -16,6 +16,14 @@ class IPAllocation(BaseModel):
     vapp_name: Optional[str] = None
     deployed: Optional[bool] = None
 
+class IPConflict(BaseModel):
+    """Модель для конфликта IP адресов"""
+    ip_address: str
+    clouds: List[str]  # Список облаков где используется IP
+    pools: List[str]   # Список пулов где используется IP
+    organizations: List[str]  # Список организаций
+    conflict_type: str  # DUPLICATE_ALLOCATION, OVERLAPPING_SUBNET
+
 class IPPool(BaseModel):
     """Модель для пула IP адресов"""
     name: str
@@ -27,6 +35,10 @@ class IPPool(BaseModel):
     usage_percentage: float
     used_addresses: List[IPAllocation]
     free_addresses: List[str]
+    # Новые поля для конфликтов
+    has_overlaps: bool = False
+    overlapping_clouds: List[str] = []
+    conflicts: Optional[List[IPConflict]] = None
 
 class CloudStats(BaseModel):
     """Статистика по облаку"""
@@ -48,3 +60,4 @@ class DashboardData(BaseModel):
     usage_percentage: float
     clouds: List[CloudStats]
     all_allocations: List[IPAllocation]
+    conflicts: Dict[str, List[IPConflict]] = {}  # IP -> список конфликтов

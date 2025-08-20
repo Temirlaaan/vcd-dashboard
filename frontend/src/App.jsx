@@ -7,9 +7,11 @@ import Overview from './components/Overview';
 import AllocatedIPs from './components/AllocatedIPs';
 import FreeIPs from './components/FreeIPs';
 import PoolDetails from './components/PoolDetails';
+import ConflictAlert from './components/ConflictAlert';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
-import { RefreshCw, Menu, X } from 'lucide-react';
+import { RefreshCw, Menu, X, AlertTriangle } from 'lucide-react';
+import { formatTime } from './utils/dateUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -21,12 +23,18 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showConflicts, setShowConflicts] = useState(false);
 
   const loadDashboardData = async () => {
     try {
       setError(null);
       const response = await axios.get(`${API_BASE_URL}/api/dashboard`);
       setDashboardData(response.data);
+      
+      // Проверяем наличие конфликтов
+      if (response.data.conflicts && Object.keys(response.data.conflicts).length > 0) {
+        setShowConflicts(true);
+      }
     } catch (err) {
       setError('Failed to load data. Please check if the backend is running.');
       console.error('Error loading dashboard data:', err);
@@ -76,6 +84,8 @@ function App() {
     return <ErrorMessage message={error} onRetry={loadDashboardData} />;
   }
 
+  const hasConflicts = dashboardData?.conflicts && Object.keys(dashboardData.conflicts).length > 0;
+
   return (
     <div className="app">
       {/* Mobile menu overlay */}
@@ -91,6 +101,7 @@ function App() {
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         mobileMenuOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
+        hasConflicts={hasConflicts}
       />
 
       {/* Main Content */}
@@ -110,8 +121,18 @@ function App() {
             </div>
           </div>
           <div className="header-right">
+            {hasConflicts && (
+              <button 
+                className="conflict-indicator"
+                onClick={() => setShowConflicts(!showConflicts)}
+                title={`${Object.keys(dashboardData.conflicts).length} IP конфликтов обнаружено`}
+              >
+                <AlertTriangle />
+                <span>{Object.keys(dashboardData.conflicts).length}</span>
+              </button>
+            )}
             <div className="last-update">
-              Last updated: {new Date(dashboardData.last_update).toLocaleTimeString()}
+              Обновлено: {formatTime(dashboardData.last_update)}
             </div>
             <button 
               className={`refresh-button ${refreshing ? 'refreshing' : ''}`}
@@ -119,10 +140,18 @@ function App() {
               disabled={refreshing}
             >
               <RefreshCw className={`refresh-icon ${refreshing ? 'spinning' : ''}`} />
-              <span className="refresh-text">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+              <span className="refresh-text">{refreshing ? 'Обновление...' : 'Обновить'}</span>
             </button>
           </div>
         </header>
+
+        {/* Conflict Alert */}
+        {showConflicts && hasConflicts && (
+          <ConflictAlert 
+            conflicts={dashboardData.conflicts}
+            onClose={() => setShowConflicts(false)}
+          />
+        )}
 
         {/* Content Area */}
         <div className="content-wrapper">
