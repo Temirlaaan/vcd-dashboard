@@ -52,8 +52,8 @@ services:
     networks:
       - vcd-network
     volumes:
-      - ./nginx/logs:/var/log/nginx
-      - ./ssl:/etc/nginx/ssl:ro  # Монтируем SSL сертификаты
+      - ./frontend/nginx/logs:/var/log/nginx
+      - ./frontend/nginx/ssl:/etc/nginx/ssl:ro  # Монтируем SSL сертификаты
     environment:
       - TZ=Asia/Almaty
     logging:
