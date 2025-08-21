@@ -1,29 +1,40 @@
 # Backend Dockerfile
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# Установка рабочей директории
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Установка системных зависимостей
+# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Копирование файла зависимостей
+# Копируем файл зависимостей
 COPY requirements.txt .
 
-# Установка Python зависимостей
-RUN pip install --no-cache-dir -r requirements.txt
+# Обновляем pip и устанавливаем зависимости
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Копирование кода приложения
+# Копируем код приложения
 COPY . .
 
-# Создание непривилегированного пользователя
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Создаем директории для логов
+RUN mkdir -p /app/logs
+
+# Создаем непривилегированного пользователя
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
 USER appuser
 
 # Экспорт порта
 EXPOSE 8000
 
-# Запуск приложения с uvicorn
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Запуск приложения
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

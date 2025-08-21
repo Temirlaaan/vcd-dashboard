@@ -4,5 +4,5 @@ backend/.env
 backend/venv/
 frontend/node_modules/
 *env
-frontend/nginx/logs/access.log
-frontend/nginx/logs/error.log
+frontend/nginx/logs/
+backend/logs

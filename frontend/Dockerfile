@@ -3,32 +3,61 @@ FROM node:22.9.0-alpine AS builder
 
 WORKDIR /app
 
-# Копируем только package.json и package-lock.json для кеширования зависимостей
+# Копируем package.json и package-lock.json
 COPY package*.json ./
 
-# Устанавливаем зависимости (только продакшн)
-RUN npm install --omit=dev
+# Устанавливаем зависимости
+RUN npm ci --only=production --silent
 
-# Копируем остальной код
+# Копируем исходный код
 COPY . .
 
 # Сборка production билда
 RUN npm run build
 
-# --- Stage 2: Nginx для раздачи статических файлов ---
-FROM nginx:stable-alpine AS runner
+# --- Stage 2: Nginx для раздачи ---
+FROM nginx:1.25-alpine AS runner
 
-# Копируем собранный build в nginx директорию
+# Устанавливаем curl для healthcheck
+RUN apk add --no-cache curl
+
+# Удаляем дефолтную конфигурацию nginx
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Копируем собранный React build
 COPY --from=builder /app/build /usr/share/nginx/html
 
-# Копируем кастомный nginx конфиг
+# Копируем нашу конфигурацию nginx
 COPY nginx/default.nginx.conf /etc/nginx/conf.d/default.conf
 
-# Копируем SSL сертификаты
-COPY nginx/ssl/t-cloud-2025.crt /etc/ssl/t-cloud-2025.crt
-COPY nginx/ssl/t-cloud-2025.key /etc/ssl/t-cloud-2025.key
+# Создаем директории для логов и SSL
+RUN mkdir -p /var/log/nginx /etc/ssl /var/www/acme
+
+# Копируем SSL сертификаты (если они есть в образе)
+# COPY nginx/ssl/*.crt /etc/ssl/
+# COPY nginx/ssl/*.key /etc/ssl/
+
+# Настраиваем права доступа
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chmod -R 755 /usr/share/nginx/html && \
+    chown -R nginx:nginx /var/log/nginx
 
 # Открываем порты
 EXPOSE 80 443
 
+# Проверяем конфигурацию nginx при запуске
+COPY <<EOF /docker-entrypoint.d/99-test-config.sh
+#!/bin/sh
+echo "Testing nginx configuration..."
+nginx -t
+if [ $? -ne 0 ]; then
+    echo "Nginx configuration test failed!"
+    exit 1
+fi
+echo "Nginx configuration test passed!"
+EOF
+
+RUN chmod +x /docker-entrypoint.d/99-test-config.sh
+
+# Запуск nginx
 CMD ["nginx", "-g", "daemon off;"]
