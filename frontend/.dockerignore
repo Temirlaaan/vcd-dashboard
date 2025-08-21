@@ -2,6 +2,7 @@ node_modules
 build
 .dockerignore
 Dockerfile
+Dockerfile.simple
 .git
 .gitignore
 README.md
@@ -17,3 +18,4 @@ yarn-error.log*
 coverage
 .vscode
 .idea
+*.log

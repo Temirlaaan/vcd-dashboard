@@ -3,19 +3,41 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Копируем package.json и package-lock.json
-COPY package*.json ./
+# Добавляем отладочную информацию
+RUN echo "Node version:" && node --version
+RUN echo "NPM version:" && npm --version
 
-# Устанавливаем зависимости для production сборки
-RUN npm ci --silent
+# Копируем только package.json сначала
+COPY package.json ./
 
-# Копируем исходный код
+# Показываем содержимое файла
+RUN echo "Package.json content:" && cat package.json
+
+# Создаем package-lock.json если его нет
+RUN npm install --package-lock-only
+
+# Очищаем npm cache
+RUN npm cache clean --force
+
+# Устанавливаем зависимости с подробным выводом
+RUN npm install --verbose
+
+# Показываем что установилось
+RUN ls -la node_modules/ | head -20
+
+# Копируем остальные файлы
 COPY . .
 
-# Сборка production билда
-RUN npm run build
+# Показываем структуру проекта
+RUN echo "Project structure:" && ls -la
 
-# --- Stage 2: Nginx для раздачи ---
+# Сборка с подробным выводом
+RUN npm run build --verbose
+
+# Показываем что получилось
+RUN echo "Build output:" && ls -la build/
+
+# --- Stage 2: Nginx ---
 FROM nginx:1.25-alpine AS runner
 
 # Устанавливаем curl для healthcheck
@@ -38,5 +60,11 @@ RUN chown -R nginx:nginx /usr/share/nginx/html && \
     chmod -R 755 /usr/share/nginx/html && \
     chown -R nginx:nginx /var/log/nginx
 
+# Тестируем конфигурацию nginx
+RUN nginx -t
+
 # Открываем порты
 EXPOSE 80 443
+
+# Запуск nginx
+CMD ["nginx", "-g", "daemon off;"]
