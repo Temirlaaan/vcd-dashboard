@@ -3,41 +3,19 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Добавляем отладочную информацию
-RUN echo "Node version:" && node --version
-RUN echo "NPM version:" && npm --version
-
-# Копируем только package.json сначала
+# Копируем package.json 
 COPY package.json ./
 
-# Показываем содержимое файла
-RUN echo "Package.json content:" && cat package.json
+# Устанавливаем зависимости (npm install вместо npm ci)
+RUN npm install --silent --production=false
 
-# Создаем package-lock.json если его нет
-RUN npm install --package-lock-only
-
-# Очищаем npm cache
-RUN npm cache clean --force
-
-# Устанавливаем зависимости с подробным выводом
-RUN npm install --verbose
-
-# Показываем что установилось
-RUN ls -la node_modules/ | head -20
-
-# Копируем остальные файлы
+# Копируем исходный код
 COPY . .
 
-# Показываем структуру проекта
-RUN echo "Project structure:" && ls -la
+# Сборка production билда
+RUN npm run build
 
-# Сборка с подробным выводом
-RUN npm run build --verbose
-
-# Показываем что получилось
-RUN echo "Build output:" && ls -la build/
-
-# --- Stage 2: Nginx ---
+# --- Stage 2: Nginx для раздачи ---
 FROM nginx:1.25-alpine AS runner
 
 # Устанавливаем curl для healthcheck
@@ -60,11 +38,22 @@ RUN chown -R nginx:nginx /usr/share/nginx/html && \
     chmod -R 755 /usr/share/nginx/html && \
     chown -R nginx:nginx /var/log/nginx
 
-# Тестируем конфигурацию nginx
-RUN nginx -t
-
 # Открываем порты
 EXPOSE 80 443
+
+# Проверяем конфигурацию nginx при запуске
+COPY <<EOF /docker-entrypoint.d/99-test-config.sh
+#!/bin/sh
+echo "Testing nginx configuration..."
+nginx -t
+if [ $? -ne 0 ]; then
+    echo "Nginx configuration test failed!"
+    exit 1
+fi
+echo "Nginx configuration test passed!"
+EOF
+
+RUN chmod +x /docker-entrypoint.d/99-test-config.sh
 
 # Запуск nginx
 CMD ["nginx", "-g", "daemon off;"]
