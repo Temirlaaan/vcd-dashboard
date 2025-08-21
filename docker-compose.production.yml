@@ -20,7 +20,7 @@ services:
       - EXPORTER_PORT=8000
       - TZ=Asia/Almaty
     volumes:
-      - ./backend/logs:/app/logs
+      - ./logs/backend:/app/logs
     networks:
       - vcd-network
     healthcheck:
@@ -53,8 +53,8 @@ services:
     networks:
       - vcd-network
     volumes:
-      - ./frontend/nginx/logs:/var/log/nginx
-      - ./frontend/nginx/ssl:/etc/nginx/ssl:ro 
+      - ./logs/nginx:/var/log/nginx
+      - ./frontend/nginx/ssl:/etc/ssl:ro  # SSL из директории проекта
     environment:
       - TZ=Asia/Almaty
     healthcheck:

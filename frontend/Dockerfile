@@ -1,13 +1,13 @@
 # --- Stage 1: Build React app ---
-FROM node:22.9.0-alpine AS builder
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
 # Копируем package.json и package-lock.json
 COPY package*.json ./
 
-# Устанавливаем зависимости
-RUN npm ci --only=production --silent
+# Устанавливаем зависимости для production сборки
+RUN npm ci --silent
 
 # Копируем исходный код
 COPY . .
@@ -30,12 +30,8 @@ COPY --from=builder /app/build /usr/share/nginx/html
 # Копируем нашу конфигурацию nginx
 COPY nginx/default.nginx.conf /etc/nginx/conf.d/default.conf
 
-# Создаем директории для логов и SSL
-RUN mkdir -p /var/log/nginx /etc/ssl /var/www/acme
-
-# Копируем SSL сертификаты (если они есть в образе)
-# COPY nginx/ssl/*.crt /etc/ssl/
-# COPY nginx/ssl/*.key /etc/ssl/
+# Создаем директории для логов и acme
+RUN mkdir -p /var/log/nginx /var/www/acme
 
 # Настраиваем права доступа
 RUN chown -R nginx:nginx /usr/share/nginx/html && \
@@ -44,20 +40,3 @@ RUN chown -R nginx:nginx /usr/share/nginx/html && \
 
 # Открываем порты
 EXPOSE 80 443
-
-# Проверяем конфигурацию nginx при запуске
-COPY <<EOF /docker-entrypoint.d/99-test-config.sh
-#!/bin/sh
-echo "Testing nginx configuration..."
-nginx -t
-if [ $? -ne 0 ]; then
-    echo "Nginx configuration test failed!"
-    exit 1
-fi
-echo "Nginx configuration test passed!"
-EOF
-
-RUN chmod +x /docker-entrypoint.d/99-test-config.sh
-
-# Запуск nginx
-CMD ["nginx", "-g", "daemon off;"]
