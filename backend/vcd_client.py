@@ -243,6 +243,21 @@ class VCDClient:
         self.cache[cache_key] = allocations
         return allocations
     
+    def get_pool_used_ips(self, pool: Dict) -> List[IPAllocation]:
+        """Получить занятые IP для конкретного пула"""
+        pool_id = pool['id']
+        pool_name = pool['name']
+        pool_type = pool['type']
+        
+        try:
+            if pool_type == 'ipSpace':
+                return self.fetch_ip_space_allocations(pool_id, pool_name)
+            else:  # externalNetwork
+                return self.fetch_external_network_used_ips(pool_id, pool_name)
+        except Exception as e:
+            logger.error(f"Error getting used IPs for pool {pool_name}: {e}")
+            return []
+    
     def get_all_used_ips(self, pools: List[Dict]) -> List[IPAllocation]:
         """Получить все занятые IP для списка пулов"""
         all_allocations = []
