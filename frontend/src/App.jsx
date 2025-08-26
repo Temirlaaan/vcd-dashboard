@@ -11,7 +11,7 @@ import PoolDetails from './components/PoolDetails';
 import ConflictAlert from './components/ConflictAlert';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
-import { RefreshCw, Menu, X, AlertTriangle, LogOut } from 'lucide-react';
+import { RefreshCw, Menu, X, AlertTriangle, LogOut, User } from 'lucide-react';
 import { formatTime } from './utils/dateUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -26,6 +26,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // Проверка токена при загрузке
   useEffect(() => {
@@ -49,7 +50,8 @@ function App() {
       const response = await axios.get(`${API_BASE_URL}/api/verify`);
       if (response.data.valid) {
         setIsAuthenticated(true);
-        loadDashboardData();
+        setCurrentUser(response.data.username);
+        await loadDashboardData();
       } else {
         handleLogout();
       }
@@ -73,6 +75,7 @@ function App() {
     delete axios.defaults.headers.common['Authorization'];
     setIsAuthenticated(false);
     setDashboardData(null);
+    setCurrentUser(null);
     setLoading(false);
   };
 
@@ -111,6 +114,8 @@ function App() {
   };
 
   const renderContent = () => {
+    if (!dashboardData) return null;
+    
     switch (activeTab) {
       case 'overview':
         return <Overview data={dashboardData} />;
@@ -134,7 +139,7 @@ function App() {
     return <LoadingSpinner />;
   }
 
-  if (error) {
+  if (error && !dashboardData) {
     return <ErrorMessage message={error} onRetry={loadDashboardData} />;
   }
 
@@ -185,9 +190,17 @@ function App() {
                 <span>{Object.keys(dashboardData.conflicts).length}</span>
               </button>
             )}
-            <div className="last-update">
-              Обновлено: {formatTime(dashboardData.last_update)}
-            </div>
+            {dashboardData && (
+              <div className="last-update">
+                Обновлено: {formatTime(dashboardData.last_update)}
+              </div>
+            )}
+            {currentUser && (
+              <div className="user-info">
+                <User className="user-icon" size={16} />
+                <span className="user-name">{currentUser}</span>
+              </div>
+            )}
             <button 
               className={`refresh-button ${refreshing ? 'refreshing' : ''}`}
               onClick={handleRefresh}
@@ -217,13 +230,19 @@ function App() {
 
         {/* Content Area */}
         <div className="content-wrapper">
-          {dashboardData && (
+          {dashboardData ? (
             <>
               <StatsCards data={dashboardData} />
               <div className="main-card">
                 {renderContent()}
               </div>
             </>
+          ) : (
+            <div className="main-card">
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                No data available. Please try refreshing.
+              </p>
+            </div>
           )}
         </div>
       </div>

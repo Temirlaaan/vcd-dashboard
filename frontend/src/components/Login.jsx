@@ -268,14 +268,6 @@ const Login = ({ onLogin }) => {
         <div style={styles.footer}>
           <p>VMware vCloud Director IP Management System</p>
         </div>
-        
-        {/* Debug информация */}
-        <div style={styles.debugInfo}>
-          <strong>Debug Info:</strong><br/>
-          Backend URL: {process.env.REACT_APP_API_URL || 'http://localhost:8000'}<br/>
-          Frontend Port: {window.location.port || '80'}<br/>
-          Check console (F12) for detailed logs
-        </div>
       </div>
     </div>
   );

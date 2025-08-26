@@ -62,11 +62,7 @@ const Sidebar = ({ activeTab, onTabChange, collapsed, onToggleCollapse, mobileMe
                 </div>
               </div>
               <div className="stat-item">
-                <Shield className="stat-icon" />
-                <div className="stat-info">
-                  <span className="stat-label">Health</span>
-                  <span className="stat-value">Good</span>
-                </div>
+              
               </div>
             </div>
           </div>

@@ -170,7 +170,7 @@
   width: 32px;
   height: 32px;
   padding: 6px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 1);
   border-radius: 6px;
   color: var(--accent);
 }
@@ -191,10 +191,10 @@
   color: var(--sidebar-text-muted);
 }
 
-.stat-value {
+.sidebar-stats .stat-value {
   font-size: 14px;
   font-weight: 500;
-  color: var(--sidebar-text);
+  color: rgba(255, 255, 255, 0.5) !important; /* Прозрачно белый с приоритетом */
 }
 
 /* Footer */
