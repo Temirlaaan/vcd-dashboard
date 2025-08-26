@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
+import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import StatsCards from './components/StatsCards';
 import Overview from './components/Overview';
@@ -10,12 +11,13 @@ import PoolDetails from './components/PoolDetails';
 import ConflictAlert from './components/ConflictAlert';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
-import { RefreshCw, Menu, X, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Menu, X, AlertTriangle, LogOut } from 'lucide-react';
 import { formatTime } from './utils/dateUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -24,6 +26,55 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
+
+  // Проверка токена при загрузке
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      verifyToken(token);
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  // Настройка axios с токеном
+  const setupAxios = (token) => {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  };
+
+  // Проверка валидности токена
+  const verifyToken = async (token) => {
+    try {
+      setupAxios(token);
+      const response = await axios.get(`${API_BASE_URL}/api/verify`);
+      if (response.data.valid) {
+        setIsAuthenticated(true);
+        loadDashboardData();
+      } else {
+        handleLogout();
+      }
+    } catch (err) {
+      console.error('Token verification failed:', err);
+      handleLogout();
+    }
+  };
+
+  // Обработка входа
+  const handleLogin = (token) => {
+    localStorage.setItem('token', token);
+    setupAxios(token);
+    setIsAuthenticated(true);
+    loadDashboardData();
+  };
+
+  // Обработка выхода
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
+    setIsAuthenticated(false);
+    setDashboardData(null);
+    setLoading(false);
+  };
 
   const loadDashboardData = async () => {
     try {
@@ -36,20 +87,18 @@ function App() {
         setShowConflicts(true);
       }
     } catch (err) {
-      setError('Failed to load data. Please check if the backend is running.');
-      console.error('Error loading dashboard data:', err);
+      if (err.response && err.response.status === 401) {
+        // Token expired or invalid
+        handleLogout();
+      } else {
+        setError('Failed to load data. Please check if the backend is running.');
+        console.error('Error loading dashboard data:', err);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    loadDashboardData();
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(loadDashboardData, 300000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -75,6 +124,11 @@ function App() {
         return <Overview data={dashboardData} />;
     }
   };
+
+  // Если не авторизован, показываем форму входа
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
 
   if (loading) {
     return <LoadingSpinner />;
@@ -141,6 +195,14 @@ function App() {
             >
               <RefreshCw className={`refresh-icon ${refreshing ? 'spinning' : ''}`} />
               <span className="refresh-text">{refreshing ? 'Обновление...' : 'Обновить'}</span>
+            </button>
+            <button 
+              className="logout-button"
+              onClick={handleLogout}
+              title="Выйти"
+            >
+              <LogOut size={18} />
+              <span className="logout-text">Выйти</span>
             </button>
           </div>
         </header>

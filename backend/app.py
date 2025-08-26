@@ -1,11 +1,12 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 import os
 import logging
 from typing import List, Dict, Set
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
 import http.client
@@ -16,6 +17,11 @@ http.client._MAXHEADERS = 1000
 from vcd_client import VCDClient
 from ip_calculator import IPCalculator
 from models import DashboardData, CloudStats, IPPool, IPAllocation, IPConflict
+from auth import (
+    Token, UserLogin, User,
+    authenticate_user, create_access_token, get_current_active_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES
+)
 
 # Настройка логирования
 logging.basicConfig(
@@ -41,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Конфигурация облаков и пулов с общими подсетями
+# Конфигурация облаков (оставляем как было)
 CLOUDS_CONFIG = {
     "vcd": {
         "url": os.getenv("VCD_URL"),
@@ -53,28 +59,28 @@ CLOUDS_CONFIG = {
                 "name": "176.98.235.0/24",
                 "network": "176.98.235.0/24",
                 "type": "ipSpace",
-                "shared_with": []  # Не общий пул
+                "shared_with": []
             },
             {
                 "id": "urn:vcloud:ipSpace:8d23d064-2de6-41a3-9d23-8555599e9d10",
                 "name": "87.255.215.0/24",
                 "network": "87.255.215.0/24",
                 "type": "ipSpace",
-                "shared_with": ["vcd02"]  # Общий пул с vcd02
+                "shared_with": ["vcd02"]
             },
             {
                 "id": "urn:vcloud:ipSpace:7315f883-a0e5-4c9c-860b-528c7830813a",
                 "name": "91.185.21.224/27",
                 "network": "91.185.21.224/27",
                 "type": "ipSpace",
-                "shared_with": ["vcd02"]  # Общий пул с vcd02
+                "shared_with": ["vcd02"]
             },
             {
                 "id": "urn:vcloud:ipSpace:5f6a1f88-094d-4877-bb9d-ee01d79da29d",
                 "name": "IPS-37.17.178.208/28-internet",
                 "network": "37.17.178.208/28",
                 "type": "ipSpace",
-                "shared_with": []  # Не общий пул
+                "shared_with": []
             }
         ]
     },
@@ -109,14 +115,14 @@ CLOUDS_CONFIG = {
                 "name": "ExtNet-176.98.235.0m25-INTERNET",
                 "network": "176.98.235.0/25",
                 "type": "externalNetwork",
-                "shared_with": []  # Это подсеть, но не общий пул
+                "shared_with": []
             },
             {
                 "id": "urn:vcloud:network:88bfab4e-4dc7-4605-b0f9-d8648f785812",
                 "name": "ExtNet-87.255.215.0m24-INTERNET",
                 "network": "87.255.215.0/24",
                 "type": "externalNetwork",
-                "shared_with": ["vcd"]  # Общий пул с vcd
+                "shared_with": ["vcd"]
             },
             {
                 "id": "urn:vcloud:network:08020a8d-eb23-4347-b434-72641e133836",
@@ -130,7 +136,7 @@ CLOUDS_CONFIG = {
                 "name": "ExtNet-91.185.21.224m27-INTERNET",
                 "network": "91.185.21.224/27",
                 "type": "externalNetwork",
-                "shared_with": ["vcd"]  # Общий пул с vcd
+                "shared_with": ["vcd"]
             }
         ]
     }
@@ -155,10 +161,7 @@ def get_local_time():
     return datetime.now(LOCAL_TZ)
 
 def check_ip_conflicts(all_allocations: List[IPAllocation]) -> Dict[str, List[IPConflict]]:
-    """
-    Проверяет конфликты IP адресов в рамках одного облака
-    Возвращает словарь с конфликтующими IP
-    """
+    """Проверяет конфликты IP адресов в рамках одного облака"""
     conflicts = {}
     
     # Группируем аллокации по облакам
@@ -185,7 +188,7 @@ def check_ip_conflicts(all_allocations: List[IPAllocation]) -> Dict[str, List[IP
                 conflicts[ip].append(
                     IPConflict(
                         ip_address=ip,
-                        clouds=[cloud_name],  # Конфликт только в одном облаке
+                        clouds=[cloud_name],
                         pools=[a.pool_name for a in allocs],
                         organizations=[a.org_name for a in allocs],
                         conflict_type="DUPLICATE_IN_CLOUD"
@@ -195,10 +198,7 @@ def check_ip_conflicts(all_allocations: List[IPAllocation]) -> Dict[str, List[IP
     return conflicts
 
 def get_globally_used_ips_for_shared_pools() -> Dict[str, Set[str]]:
-    """
-    Получить занятые IP для общих пулов со всех облаков
-    Возвращает словарь: network -> set of used IPs
-    """
+    """Получить занятые IP для общих пулов со всех облаков"""
     shared_pool_ips = {}
     
     # Определяем все общие пулы
@@ -231,17 +231,54 @@ def get_globally_used_ips_for_shared_pools() -> Dict[str, Set[str]]:
     
     return shared_pool_ips
 
+# ================== АВТОРИЗАЦИЯ ==================
+
+@app.post("/api/login", response_model=Token)
+async def login(user_login: UserLogin):
+    """Вход в систему"""
+    user = authenticate_user(user_login.username, user_login.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/verify")
+async def verify_token(current_user: User = Depends(get_current_active_user)):
+    """Проверка токена"""
+    return {"valid": True, "username": current_user.username}
+
+# ================== ПУБЛИЧНЫЕ ЭНДПОИНТЫ ==================
+
 @app.get("/")
 async def root():
-    """Возвращает HTML страницу"""
+    """Возвращает HTML страницу (публичный)"""
     html_path = Path(__file__).parent.parent / "frontend" / "index.html"
     if html_path.exists():
         return FileResponse(html_path)
     return {"message": "VCD IP Manager API"}
 
+@app.get("/api/health")
+async def health_check():
+    """Проверка состояния API (публичный)"""
+    return {
+        "status": "healthy",
+        "timestamp": get_local_time().isoformat(),
+        "timezone": str(LOCAL_TZ),
+        "clouds_configured": list(vcd_clients.keys())
+    }
+
+# ================== ЗАЩИЩЕННЫЕ ЭНДПОИНТЫ ==================
+
 @app.get("/api/dashboard", response_model=DashboardData)
-async def get_dashboard_data():
-    """Получить все данные для дашборда с учетом общих пулов"""
+async def get_dashboard_data(current_user: User = Depends(get_current_active_user)):
+    """Получить все данные для дашборда (требует авторизации)"""
     try:
         all_clouds_stats = []
         all_allocations = []
@@ -347,7 +384,6 @@ async def get_dashboard_data():
                 all_clouds_stats.append(cloud_stats)
                 
                 # Для общей статистики учитываем только независимые пулы
-                # чтобы не считать общие пулы дважды
                 for pool_config in pools:
                     if not pool_config.get("shared_with"):
                         pool_stats = next(p for p in cloud_pools if p.name == pool_config["name"])
@@ -384,8 +420,8 @@ async def get_dashboard_data():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/conflicts")
-async def get_ip_conflicts():
-    """Получить список конфликтующих IP адресов"""
+async def get_ip_conflicts(current_user: User = Depends(get_current_active_user)):
+    """Получить список конфликтующих IP адресов (требует авторизации)"""
     try:
         all_allocations = []
         
@@ -406,16 +442,6 @@ async def get_ip_conflicts():
     except Exception as e:
         logger.error(f"Error checking conflicts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/health")
-async def health_check():
-    """Проверка состояния API"""
-    return {
-        "status": "healthy",
-        "timestamp": get_local_time().isoformat(),
-        "timezone": str(LOCAL_TZ),
-        "clouds_configured": list(vcd_clients.keys())
-    }
 
 if __name__ == "__main__":
     import uvicorn
