@@ -10,5 +10,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev c
 
 COPY . .
 
-EXPOSE 5000
+EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "1"]
