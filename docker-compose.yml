@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   backend:
     build:
@@ -9,28 +10,31 @@ services:
     expose:
       - "8000"
     env_file:
-      - .env
+      - ./backend/.env
+    networks:
+      - vcd_network
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/vcd_history.db:/app/vcd_history.db
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: vcd_frontend
     restart: unless-stopped
-    expose:
-      - "3000"
-    depends_on:
-      - backend
-
-  nginx:
-    image: nginx:1.25
-    container_name: vcd_nginx
-    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - ./frontend/nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./frontend/nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
-      - frontend
       - backend
+    networks:
+      - vcd_network
+    volumes:
+      - ./ssl:/etc/nginx/ssl:ro
+    environment:
+      - DOMAIN=vcd-public-ips.t-cloud.kz
+
+networks:
+  vcd_network:
+    driver: bridge
