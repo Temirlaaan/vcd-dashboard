@@ -1,0 +1,37 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ./vcd-dashboard-main/backend
+      dockerfile: Dockerfile
+    container_name: vcd_backend
+    restart: unless-stopped
+    expose:
+      - "5000"
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    build:
+      context: ./vcd-dashboard-main/frontend
+      dockerfile: Dockerfile
+    container_name: vcd_frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:1.25
+    container_name: vcd_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./vcd-dashboard-main/frontend/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
