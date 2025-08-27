@@ -1,3 +1,12 @@
+#!/bin/bash
+
+echo "========================================="
+echo "Fixing API proxy issue"
+echo "========================================="
+
+# Обновляем nginx.conf
+echo "Updating nginx.conf..."
+cat > frontend/nginx.conf << 'EOF'
 # Redirect HTTP to HTTPS
 server {
     listen 80;
@@ -105,3 +114,51 @@ server {
     access_log /var/log/nginx/access.log;
     error_log /var/log/nginx/error.log warn;
 }
+EOF
+
+echo "✅ nginx.conf updated"
+
+# Перестраиваем frontend контейнер
+echo ""
+echo "Rebuilding frontend container..."
+docker compose stop frontend
+docker compose build frontend
+docker compose up -d frontend
+
+# Ждем запуска
+echo ""
+echo "Waiting for frontend to start..."
+sleep 5
+
+# Проверяем статус
+echo ""
+echo "Checking container status..."
+docker compose ps
+
+# Тестируем API
+echo ""
+echo "Testing API endpoint..."
+echo -n "Backend health check: "
+if docker exec vcd_backend curl -s http://localhost:8000/api/health | grep -q "healthy"; then
+    echo "✅ OK"
+else
+    echo "⚠️  Failed"
+fi
+
+echo -n "Frontend proxy test: "
+if curl -k -s https://localhost/api/health 2>/dev/null | grep -q "healthy"; then
+    echo "✅ OK"
+else
+    echo "⚠️  Failed"
+fi
+
+echo ""
+echo "========================================="
+echo "Fix completed!"
+echo ""
+echo "Now you should be able to login at:"
+echo "  https://vcd-public-ips.t-cloud.kz"
+echo ""
+echo "Check logs if still having issues:"
+echo "  docker compose logs -f backend"
+echo "========================================="
