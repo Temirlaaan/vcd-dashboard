@@ -11,15 +11,11 @@ services:
       - "8000"
     env_file:
       - ./backend/.env
-    environment:
-      - REDIS_HOST=host.docker.internal
-      - REDIS_PORT=6379
     networks:
       - vcd_network
     volumes:
       - ./backend/logs:/app/logs
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - ./backend/vcd_history.db:/app/vcd_history.db
 
   frontend:
     build:

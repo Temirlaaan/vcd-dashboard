@@ -1,14 +1,16 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 import os
 import logging
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional  # <-- ДОБАВЛЕН Optional
 from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
 import http.client
+import io
 
 # Увеличиваем лимит заголовков для обработки больших ответов от VCD
 http.client._MAXHEADERS = 1000
@@ -16,15 +18,11 @@ http.client._MAXHEADERS = 1000
 from vcd_client import VCDClient
 from ip_calculator import IPCalculator
 from models import DashboardData, CloudStats, IPPool, IPAllocation, IPConflict
-from keycloak_auth import (
-    get_current_active_user, 
-    login_user, 
-    refresh_token as refresh_keycloak_token,
-    logout_user,
-    KeycloakUser
+from auth import (
+    Token, UserLogin, User,
+    authenticate_user, create_access_token, get_current_active_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES
 )
-from redis_cache import cache
-from pydantic import BaseModel
 
 # Настройка логирования
 logging.basicConfig(
@@ -36,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Загружаем переменные окружения
 load_dotenv()
 
-app = FastAPI(title="VCD IP Manager", version="2.0.0")
+app = FastAPI(title="VCD IP Manager", version="1.0.0")
 
 # Настройка часового пояса (Астана/Алматы)
 LOCAL_TZ = pytz.timezone('Asia/Almaty')  # UTC+6
@@ -50,7 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Конфигурация облаков
+# Конфигурация облаков (оставляем как было)
 CLOUDS_CONFIG = {
     "vcd": {
         "url": os.getenv("VCD_URL"),
@@ -201,126 +199,61 @@ def check_ip_conflicts(all_allocations: List[IPAllocation]) -> Dict[str, List[IP
     return conflicts
 
 def get_globally_used_ips_for_shared_pools() -> Dict[str, Set[str]]:
-    """
-    ИСПРАВЛЕНИЕ БАГА: Получить ВСЕ занятые IP для общих пулов со всех облаков.
-    Это гарантирует, что если IP занят в одном облаке, он не будет показан как свободный в другом.
-    """
+    """Получить занятые IP для общих пулов со всех облаков"""
     shared_pool_ips = {}
     
-    # Определяем все общие пулы и их сети
-    shared_networks = {}
+    # Определяем все общие пулы
+    shared_networks = set()
     for cloud_config in CLOUDS_CONFIG.values():
         for pool in cloud_config["pools"]:
             if pool.get("shared_with"):
-                network = pool["network"]
-                if network not in shared_networks:
-                    shared_networks[network] = {
-                        "clouds": [pool.get("shared_with", [])],
-                        "pools": []
-                    }
-                shared_networks[network]["pools"].append(pool["name"])
+                shared_networks.add(pool["network"])
     
-    logger.info(f"Found {len(shared_networks)} shared networks")
+    logger.info(f"Found shared networks: {shared_networks}")
     
-    # Инициализируем множества для каждой общей сети
-    for network in shared_networks.keys():
+    # Собираем занятые IP для каждой общей сети
+    for network in shared_networks:
         shared_pool_ips[network] = set()
     
-    # Собираем ВСЕ занятые IP со ВСЕХ облаков для каждой общей сети
+    # Получаем занятые IP со всех облаков для общих пулов
     for cloud_name, client in vcd_clients.items():
         config = CLOUDS_CONFIG[cloud_name]
         try:
             for pool_config in config["pools"]:
-                network = pool_config["network"]
-                
-                # Если это общий пул ИЛИ его сеть используется в другом облаке как общая
-                if network in shared_networks:
+                if pool_config["network"] in shared_networks:
+                    # Это общий пул, собираем его занятые IP
                     allocations = client.get_pool_used_ips(pool_config)
                     for allocation in allocations:
-                        shared_pool_ips[network].add(allocation.ip_address)
-                    
-                    logger.info(
-                        f"Cloud {cloud_name}, pool {pool_config['name']}: "
-                        f"added {len(allocations)} IPs to shared pool {network}"
-                    )
+                        shared_pool_ips[pool_config["network"]].add(allocation.ip_address)
+                    logger.info(f"Cloud {cloud_name}, pool {pool_config['name']}: "
+                              f"{len(allocations)} IPs used in shared pool")
         except Exception as e:
             logger.error(f"Error collecting shared pool IPs from {cloud_name}: {e}")
     
-    # Логируем итоговую статистику
-    for network, ips in shared_pool_ips.items():
-        logger.info(f"Shared network {network}: total {len(ips)} used IPs across all clouds")
-    
     return shared_pool_ips
-
-# Модели для API
-class UserLogin(BaseModel):
-    username: str
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    refresh_token: Optional[str] = None
-    token_type: str
-    expires_in: Optional[int] = None
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
 
 # ================== АВТОРИЗАЦИЯ ==================
 
 @app.post("/api/login", response_model=Token)
 async def login(user_login: UserLogin):
-    """Вход в систему через Keycloak"""
-    try:
-        token_data = login_user(user_login.username, user_login.password)
-        return token_data
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Login error: {e}")
+    """Вход в систему"""
+    user = authenticate_user(user_login.username, user_login.password)
+    if not user:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during login"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-
-@app.post("/api/refresh", response_model=Token)
-async def refresh(refresh_request: RefreshTokenRequest):
-    """Обновление токена"""
-    try:
-        token_data = refresh_keycloak_token(refresh_request.refresh_token)
-        return token_data
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Token refresh error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during token refresh"
-        )
-
-@app.post("/api/logout")
-async def logout(
-    refresh_request: RefreshTokenRequest,
-    current_user: KeycloakUser = Depends(get_current_active_user)
-):
-    """Выход из системы"""
-    try:
-        logout_user(refresh_request.refresh_token)
-        return {"message": "Successfully logged out"}
-    except Exception as e:
-        logger.error(f"Logout error: {e}")
-        # Не выбрасываем исключение, т.к. токен может быть уже невалидным
-        return {"message": "Logged out (with warnings)"}
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/api/verify")
-async def verify_token(current_user: KeycloakUser = Depends(get_current_active_user)):
+async def verify_token(current_user: User = Depends(get_current_active_user)):
     """Проверка токена"""
-    return {
-        "valid": True,
-        "username": current_user.username,
-        "email": current_user.email,
-        "roles": current_user.roles
-    }
+    return {"valid": True, "username": current_user.username}
 
 # ================== ПУБЛИЧНЫЕ ЭНДПОИНТЫ ==================
 
@@ -330,35 +263,23 @@ async def root():
     html_path = Path(__file__).parent.parent / "frontend" / "index.html"
     if html_path.exists():
         return FileResponse(html_path)
-    return {"message": "VCD IP Manager API v2.0"}
+    return {"message": "VCD IP Manager API"}
 
 @app.get("/api/health")
 async def health_check():
     """Проверка состояния API (публичный)"""
-    redis_stats = cache.get_stats()
-    
     return {
         "status": "healthy",
         "timestamp": get_local_time().isoformat(),
         "timezone": str(LOCAL_TZ),
-        "clouds_configured": list(vcd_clients.keys()),
-        "redis": redis_stats
+        "clouds_configured": list(vcd_clients.keys())
     }
 
 # ================== ЗАЩИЩЕННЫЕ ЭНДПОИНТЫ ==================
 
 @app.get("/api/dashboard", response_model=DashboardData)
-async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_active_user)):
+async def get_dashboard_data(current_user: User = Depends(get_current_active_user)):
     """Получить все данные для дашборда (требует авторизации)"""
-    
-    # Пытаемся получить из кеша
-    cache_key = "dashboard_data"
-    cached_data = cache.get(cache_key)
-    
-    if cached_data:
-        logger.info(f"Dashboard data loaded from cache for user {current_user.username}")
-        return cached_data
-    
     try:
         all_clouds_stats = []
         all_allocations = []
@@ -366,8 +287,8 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
         used_ips_count = 0
         free_ips_count = 0
         
-        # ИСПРАВЛЕНИЕ БАГА: Сначала собираем занятые IP для общих пулов
-        logger.info("Collecting used IPs for shared pools across all clouds...")
+        # Сначала собираем занятые IP для общих пулов
+        logger.info("Collecting used IPs for shared pools...")
         shared_pool_used_ips = get_globally_used_ips_for_shared_pools()
         
         # Собираем все аллокации для проверки конфликтов
@@ -407,22 +328,19 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
                     # Получаем аллокации для этого пула
                     pool_allocations = [a for a in cloud_allocations if a.pool_name == pool_config["name"]]
                     
-                    # ИСПРАВЛЕНИЕ БАГА: Определяем занятые IP правильно
-                    network = pool_config["network"]
-                    if network in shared_pool_used_ips:
-                        # Для общего пула используем ГЛОБАЛЬНЫЕ занятые IP
-                        used_ips_set = shared_pool_used_ips[network]
-                        logger.info(
-                            f"Pool {pool_config['name']} in {cloud_name}: "
-                            f"using {len(used_ips_set)} globally used IPs for shared network {network}"
-                        )
+                    # Определяем занятые IP
+                    if pool_config.get("shared_with"):
+                        # Для общего пула используем глобальные занятые IP
+                        used_ips_set = shared_pool_used_ips.get(pool_config["network"], set())
+                        logger.info(f"Shared pool {pool_config['name']} in {cloud_name}: "
+                                  f"{len(used_ips_set)} total used IPs across all clouds")
                     else:
                         # Для независимого пула только локальные IP
                         used_ips_set = set(a.ip_address for a in pool_allocations)
                     
                     # Рассчитываем свободные IP
                     free_ips, total, used, free = IPCalculator.calculate_free_ips(
-                        network,
+                        pool_config["network"],
                         used_ips_set
                     )
                     
@@ -435,7 +353,7 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
                     # Создаем объект пула
                     pool = IPPool(
                         name=pool_config["name"],
-                        network=network,
+                        network=pool_config["network"],
                         cloud_name=cloud_name,
                         total_ips=total,
                         used_ips=used,
@@ -443,7 +361,7 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
                         usage_percentage=round((used / total * 100) if total > 0 else 0, 2),
                         used_addresses=pool_allocations,
                         free_addresses=free_ips[:100] if len(free_ips) > 100 else free_ips,
-                        has_overlaps=network in shared_pool_used_ips,
+                        has_overlaps=len(pool_config.get("shared_with", [])) > 0,
                         overlapping_clouds=pool_config.get("shared_with", []),
                         conflicts=pool_conflicts if pool_conflicts else None
                     )
@@ -467,16 +385,17 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
                 all_clouds_stats.append(cloud_stats)
                 
                 # Для общей статистики учитываем только независимые пулы
-                counted_networks = set()
                 for pool_config in pools:
-                    network = pool_config["network"]
-                    # Считаем только если сеть еще не учтена
-                    if network not in counted_networks:
+                    if not pool_config.get("shared_with"):
                         pool_stats = next(p for p in cloud_pools if p.name == pool_config["name"])
                         total_ips_count += pool_stats.total_ips
                         used_ips_count += pool_stats.used_ips
                         free_ips_count += pool_stats.free_ips
-                        counted_networks.add(network)
+                    elif cloud_name == "vcd":  # Считаем общие пулы только один раз (от vcd)
+                        pool_stats = next(p for p in cloud_pools if p.name == pool_config["name"])
+                        total_ips_count += pool_stats.total_ips
+                        used_ips_count += pool_stats.used_ips
+                        free_ips_count += pool_stats.free_ips
                 
             except Exception as e:
                 logger.error(f"Error processing cloud {cloud_name}: {e}")
@@ -495,10 +414,6 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
             conflicts=conflicts if conflicts else {}
         )
         
-        # Сохраняем в кеш
-        cache.set(cache_key, dashboard.dict(), ttl=300)  # 5 минут
-        logger.info(f"Dashboard data cached for user {current_user.username}")
-        
         return dashboard
         
     except Exception as e:
@@ -506,7 +421,7 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/conflicts")
-async def get_ip_conflicts(current_user: KeycloakUser = Depends(get_current_active_user)):
+async def get_ip_conflicts(current_user: User = Depends(get_current_active_user)):
     """Получить список конфликтующих IP адресов (требует авторизации)"""
     try:
         all_allocations = []
@@ -527,17 +442,6 @@ async def get_ip_conflicts(current_user: KeycloakUser = Depends(get_current_acti
         
     except Exception as e:
         logger.error(f"Error checking conflicts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/cache/clear")
-async def clear_cache(current_user: KeycloakUser = Depends(get_current_active_user)):
-    """Очистить кеш (требует авторизации)"""
-    try:
-        cache.clear_pattern("dashboard_data*")
-        logger.info(f"Cache cleared by user {current_user.username}")
-        return {"message": "Cache cleared successfully"}
-    except Exception as e:
-        logger.error(f"Error clearing cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
