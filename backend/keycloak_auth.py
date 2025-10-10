@@ -1,4 +1,4 @@
-# backend/keycloak_auth.py
+# backend/keycloak_auth.py (полный код с добавлением функции)
 import os
 from typing import Optional
 from fastapi import Depends, HTTPException, status
@@ -220,3 +220,37 @@ def logout_user(refresh_token: str):
         logger.info("User logged out successfully")
     except Exception as e:
         logger.error(f"Logout failed: {e}")
+
+def exchange_code_for_token(code: str) -> dict:
+    """Обмен authorization code на токен"""
+    if not keycloak_openid:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Keycloak service is not available"
+        )
+    
+    try:
+        # Получаем redirect_uri динамически или из config (замените на ваш frontend URL)
+        redirect_uri = os.getenv("FRONTEND_CALLBACK_URL", "https://vcd-public-ips.t-cloud.kz/callback")  # Добавьте в .env
+        
+        token = keycloak_openid.token(
+            grant_type='authorization_code',
+            code=code,
+            redirect_uri=redirect_uri
+        )
+        
+        logger.info("Code exchanged for token successfully")
+        
+        return {
+            "access_token": token["access_token"],
+            "refresh_token": token.get("refresh_token"),
+            "expires_in": token.get("expires_in"),
+            "token_type": "bearer"
+        }
+    except Exception as e:
+        logger.error(f"Code exchange failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not exchange code for token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

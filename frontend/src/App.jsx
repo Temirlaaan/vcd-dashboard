@@ -1,3 +1,4 @@
+// frontend/src/App.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
@@ -27,16 +28,49 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [refreshToken, setRefreshToken] = useState(null);  // Новый state для refresh_token
 
-  // Проверка токена при загрузке
+  // Проверка токена при загрузке + обработка callback
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('access_token');
+    const storedRefresh = localStorage.getItem('refresh_token');
     if (token) {
+      setRefreshToken(storedRefresh);
       verifyToken(token);
     } else {
+      handleCallback();  // Проверяем, если это callback URL
       setLoading(false);
     }
   }, []);
+
+  // Обработка callback (если URL содержит ?code=)
+  const handleCallback = async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    if (code) {
+      try {
+        setLoading(true);
+        const response = await axios.get(`${API_BASE_URL}/api/callback?code=${code}`);
+        const { access_token, refresh_token } = response.data;
+        
+        localStorage.setItem('access_token', access_token);
+        localStorage.setItem('refresh_token', refresh_token);
+        setRefreshToken(refresh_token);
+        
+        // Очищаем URL от params
+        window.history.replaceState({}, document.title, "/");
+        
+        setupAxios(access_token);
+        setIsAuthenticated(true);
+        await loadDashboardData();
+      } catch (err) {
+        setError('Failed to exchange code for token.');
+        console.error('Callback error:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
 
   // Настройка axios с токеном
   const setupAxios = (token) => {
@@ -61,22 +95,58 @@ function App() {
     }
   };
 
-  // Обработка входа
-  const handleLogin = (token) => {
-    localStorage.setItem('token', token);
-    setupAxios(token);
+  // Обработка входа (теперь не используется напрямую, но оставил для fallback)
+  const handleLogin = (tokenData) => {
+    localStorage.setItem('access_token', tokenData.access_token);
+    localStorage.setItem('refresh_token', tokenData.refresh_token);
+    setRefreshToken(tokenData.refresh_token);
+    setupAxios(tokenData.access_token);
     setIsAuthenticated(true);
     loadDashboardData();
   };
 
-  // Обработка выхода
-  const handleLogout = () => {
-    localStorage.removeItem('token');
+  // Обработка выхода с инвалидацией refresh_token
+  const handleLogout = async () => {
+    if (refreshToken) {
+      try {
+        await axios.post(`${API_BASE_URL}/api/logout`, { refresh_token: refreshToken });
+      } catch (err) {
+        console.error('Logout error:', err);
+      }
+    }
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     delete axios.defaults.headers.common['Authorization'];
     setIsAuthenticated(false);
     setDashboardData(null);
     setCurrentUser(null);
+    setRefreshToken(null);
     setLoading(false);
+  };
+
+  // Refresh токена
+  const handleRefresh = async () => {
+    if (refreshToken) {
+      try {
+        setRefreshing(true);
+        const response = await axios.post(`${API_BASE_URL}/api/refresh`, { refresh_token: refreshToken });
+        const { access_token, refresh_token: newRefresh } = response.data;
+        
+        localStorage.setItem('access_token', access_token);
+        if (newRefresh) localStorage.setItem('refresh_token', newRefresh);
+        setRefreshToken(newRefresh || refreshToken);
+        
+        setupAxios(access_token);
+        await loadDashboardData();
+      } catch (err) {
+        console.error('Token refresh failed:', err);
+        if (err.response?.status === 401) handleLogout();
+      } finally {
+        setRefreshing(false);
+      }
+    } else {
+      handleLogout();
+    }
   };
 
   const loadDashboardData = async () => {
@@ -103,11 +173,6 @@ function App() {
     }
   };
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    loadDashboardData();
-  };
-
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setMobileMenuOpen(false);
@@ -130,7 +195,6 @@ function App() {
     }
   };
 
-  // Если не авторизован, показываем форму входа
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }

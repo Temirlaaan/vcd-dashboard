@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+# backend/app.py (полный код с добавлением)
+from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -21,7 +22,8 @@ from keycloak_auth import (
     login_user, 
     refresh_token as refresh_keycloak_token,
     logout_user,
-    KeycloakUser
+    KeycloakUser,
+    exchange_code_for_token  # Новый import
 )
 from redis_cache import cache
 from pydantic import BaseModel
@@ -321,6 +323,16 @@ async def verify_token(current_user: KeycloakUser = Depends(get_current_active_u
         "email": current_user.email,
         "roles": current_user.roles
     }
+
+@app.get("/api/callback", response_model=Token)
+async def keycloak_callback(code: str = Query(...)):
+    """Обмен code на token после редиректа от Keycloak"""
+    try:
+        token_data = exchange_code_for_token(code)
+        return token_data
+    except Exception as e:
+        logger.error(f"Callback error: {e}")
+        raise HTTPException(status_code=401, detail="Authorization failed")
 
 # ================== ПУБЛИЧНЫЕ ЭНДПОИНТЫ ==================
 

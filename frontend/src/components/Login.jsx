@@ -1,58 +1,30 @@
 // frontend/src/components/Login.jsx
 import React, { useState } from 'react';
-import { Lock, User, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Lock, AlertCircle } from 'lucide-react';
 
 const Login = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleKeycloakLogin = () => {
     setError('');
-    setLoading(true);
-
-    // Определяем правильный URL для backend
-    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-    const loginUrl = `${API_BASE_URL}/api/login`;
-    
-    console.log('🔐 Attempting login...');
-    console.log('📍 Backend URL:', loginUrl);
-    console.log('👤 Username:', username);
-
     try {
-      const response = await fetch(loginUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-      });
+      // Получаем конфиг из env или hardcoded (рекомендую добавить в .env: REACT_APP_KEYCLOAK_URL, etc.)
+      const keycloakUrl = process.env.REACT_APP_KEYCLOAK_URL || 'https://sso-ttc.t-cloud.kz';
+      const realm = process.env.REACT_APP_KEYCLOAK_REALM || 'prod-v1';
+      const clientId = process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'vcd-ip-manager';
+      const redirectUri = encodeURIComponent(`${window.location.origin}/callback`);  // Динамический redirect
 
-      console.log('📥 Response status:', response.status);
-
-      const data = await response.json();
-      console.log('📦 Response data:', data);
-
-      if (response.ok) {
-        console.log('✅ Login successful!');
-        localStorage.setItem('token', data.access_token);
-        onLogin(data.access_token);
-      } else {
-        console.log('❌ Login failed:', data.detail);
-        setError(data.detail || 'Invalid credentials');
-      }
+      const authUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid profile email`;
+      
+      console.log('Redirecting to Keycloak:', authUrl);
+      window.location.href = authUrl;  // Редирект на Keycloak login page
     } catch (err) {
-      console.error('🚫 Connection error:', err);
-      setError(`Connection error: ${err.message}. Backend may not be running on ${API_BASE_URL}`);
-    } finally {
-      setLoading(false);
+      setError('Failed to initiate login. Please try again.');
+      console.error('Keycloak redirect error:', err);
     }
   };
 
-  // Стили компонента (оставляем как было)
+  // Стили (вставьте ваши стили из оригинала, упростил без password/username inputs)
   const styles = {
     container: {
       minHeight: '100vh',
@@ -101,39 +73,6 @@ const Login = ({ onLogin }) => {
       flexDirection: 'column',
       gap: '20px',
     },
-    inputGroup: {
-      position: 'relative',
-    },
-    inputIcon: {
-      position: 'absolute',
-      left: '15px',
-      top: '50%',
-      transform: 'translateY(-50%)',
-      width: '20px',
-      height: '20px',
-      color: '#94a3b8',
-    },
-    input: {
-      width: '100%',
-      padding: '12px 15px 12px 45px',
-      border: '2px solid #e2e8f0',
-      borderRadius: '10px',
-      fontSize: '15px',
-      transition: 'all 0.3s ease',
-      outline: 'none',
-    },
-    passwordToggle: {
-      position: 'absolute',
-      right: '15px',
-      top: '50%',
-      transform: 'translateY(-50%)',
-      background: 'none',
-      border: 'none',
-      cursor: 'pointer',
-      padding: '5px',
-      color: '#94a3b8',
-      transition: 'color 0.2s',
-    },
     errorBox: {
       background: '#fef2f2',
       border: '1px solid #fecaca',
@@ -172,27 +111,11 @@ const Login = ({ onLogin }) => {
       justifyContent: 'center',
       gap: '10px',
     },
-    submitButtonDisabled: {
-      opacity: '0.6',
-      cursor: 'not-allowed',
-    },
-    lockIcon: {
-      width: '18px',
-      height: '18px',
-    },
     footer: {
       marginTop: '30px',
       textAlign: 'center',
       fontSize: '13px',
       color: '#94a3b8',
-    },
-    debugInfo: {
-      marginTop: '20px',
-      padding: '10px',
-      background: '#f3f4f6',
-      borderRadius: '8px',
-      fontSize: '12px',
-      color: '#6b7280',
     },
   };
 
@@ -204,66 +127,23 @@ const Login = ({ onLogin }) => {
         </div>
         
         <h1 style={styles.title}>VCD IP Manager</h1>
-        <p style={styles.subtitle}>Sign in to access the dashboard</p>
+        <p style={styles.subtitle}>Sign in with Keycloak to access the dashboard</p>
         
-        <form style={styles.form} onSubmit={handleSubmit}>
-          <div style={styles.inputGroup}>
-            <User style={styles.inputIcon} />
-            <input
-              type="text"
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              style={styles.input}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
-              onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              required
-              disabled={loading}
-            />
+        {error && (
+          <div style={styles.errorBox}>
+            <AlertCircle style={styles.errorIcon} />
+            <div style={styles.errorText}>{error}</div>
           </div>
-          
-          <div style={styles.inputGroup}>
-            <Lock style={styles.inputIcon} />
-            <input
-              type={showPassword ? 'text' : 'password'}
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={styles.input}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
-              onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              required
-              disabled={loading}
-            />
-            <button
-              type="button"
-              style={styles.passwordToggle}
-              onClick={() => setShowPassword(!showPassword)}
-              tabIndex={-1}
-            >
-              {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-            </button>
-          </div>
-          
-          {error && (
-            <div style={styles.errorBox}>
-              <AlertCircle style={styles.errorIcon} />
-              <div style={styles.errorText}>{error}</div>
-            </div>
-          )}
-          
-          <button
-            type="submit"
-            style={{
-              ...styles.submitButton,
-              ...(loading ? styles.submitButtonDisabled : {})
-            }}
-            disabled={loading}
-          >
-            <Lock style={styles.lockIcon} />
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+        )}
+        
+        <button
+          type="button"
+          style={styles.submitButton}
+          onClick={handleKeycloakLogin}
+        >
+          <Lock style={styles.lockIcon} />
+          Sign In with Keycloak
+        </button>
         
         <div style={styles.footer}>
           <p>VMware vCloud Director IP Management System</p>
