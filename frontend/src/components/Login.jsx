@@ -67,6 +67,10 @@ const Login = ({ onLogin }) => {
       marginBottom: '30px',
       fontSize: '14px',
       color: '#64748b',
+      width: '100%', // Ensure it spans the full width of the parent
+      display: 'block', // Ensure it's a block element for consistent centering
+      marginLeft: 'auto', // Explicitly center horizontally
+      marginRight: 'auto',
     },
     form: {
       display: 'flex',
