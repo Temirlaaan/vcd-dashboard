@@ -16,10 +16,17 @@ services:
       - REDIS_PORT=6379
     networks:
       - vcd_network
+      - proxy-network  # ← ДОБАВЛЕНО: подключение к общему Nginx
     volumes:
       - ./backend/logs:/app/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   frontend:
     build:
@@ -27,18 +34,30 @@ services:
       dockerfile: Dockerfile
     container_name: vcd_frontend
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
+    # ИЗМЕНЕНО: убраны публичные порты, теперь доступ только через nginx-proxy
+    expose:
+      - "80"
     depends_on:
       - backend
     networks:
       - vcd_network
+      - proxy-network  # ← ДОБАВЛЕНО: подключение к общему Nginx
     volumes:
+      # SSL сертификаты больше не нужны внутри контейнера
+      # Но можно оставить если внутренний nginx их использует
       - ./ssl:/etc/nginx/ssl:ro
     environment:
       - DOMAIN=vcd-public-ips.t-cloud.kz
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   vcd_network:
     driver: bridge
+  # ДОБАВЛЕНО: подключение к внешней сети для nginx-proxy
+  proxy-network:
+    external: true
+    name: proxy-network

@@ -1,4 +1,4 @@
-# backend/app.py
+# backend/app.py (полный код с добавлением)
 from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
 import http.client
-import ipaddress  # Добавлен импорт для ipaddress
 
 # Увеличиваем лимит заголовков для обработки больших ответов от VCD
 http.client._MAXHEADERS = 1000
@@ -24,7 +23,7 @@ from keycloak_auth import (
     refresh_token as refresh_keycloak_token,
     logout_user,
     KeycloakUser,
-    exchange_code_for_token
+    exchange_code_for_token  # Новый import
 )
 from redis_cache import cache
 from pydantic import BaseModel
@@ -205,46 +204,53 @@ def check_ip_conflicts(all_allocations: List[IPAllocation]) -> Dict[str, List[IP
 
 def get_globally_used_ips_for_shared_pools() -> Dict[str, Set[str]]:
     """
-    Получить ВСЕ занятые IP для общих пулов со всех облаков, включая пересекающиеся подсети.
+    ИСПРАВЛЕНИЕ БАГА: Получить ВСЕ занятые IP для общих пулов со всех облаков.
+    Это гарантирует, что если IP занят в одном облаке, он не будет показан как свободный в другом.
     """
     shared_pool_ips = {}
     
-    # Собираем все networks из всех clouds
-    all_networks = {}
-    for cloud_name, config in CLOUDS_CONFIG.items():
-        for pool in config["pools"]:
-            network = pool["network"]
-            all_networks[network] = {
-                "cloud": cloud_name,
-                "pool_config": pool,
-                "ip_net": ipaddress.ip_network(network)
-            }
-    
-    # Детектируем shared: explicit (shared_with) + overlaps
+    # Определяем все общие пулы и их сети
     shared_networks = {}
-    for net1, info1 in all_networks.items():
-        for net2, info2 in all_networks.items():
-            if net1 != net2 and (info1["ip_net"].overlaps(info2["ip_net"]) or info1["pool_config"].get("shared_with") or info2["pool_config"].get("shared_with")):
-                # Объединяем в группу (key — наибольшая сеть)
-                group_key = str(max(info1["ip_net"], info2["ip_net"], key=lambda n: n.num_addresses))
-                if group_key not in shared_networks:
-                    shared_networks[group_key] = set()
-                shared_networks[group_key].add(net1)
-                shared_networks[group_key].add(net2)
+    for cloud_config in CLOUDS_CONFIG.values():
+        for pool in cloud_config["pools"]:
+            if pool.get("shared_with"):
+                network = pool["network"]
+                if network not in shared_networks:
+                    shared_networks[network] = {
+                        "clouds": [pool.get("shared_with", [])],
+                        "pools": []
+                    }
+                shared_networks[network]["pools"].append(pool["name"])
     
-    logger.info(f"Found {len(shared_networks)} shared/overlapping network groups")
+    logger.info(f"Found {len(shared_networks)} shared networks")
     
-    # Для каждой группы собираем used_ips со всех clouds
-    for group_key, networks in shared_networks.items():
-        shared_pool_ips[group_key] = set()
-        for cloud_name, client in vcd_clients.items():
-            config = CLOUDS_CONFIG[cloud_name]
+    # Инициализируем множества для каждой общей сети
+    for network in shared_networks.keys():
+        shared_pool_ips[network] = set()
+    
+    # Собираем ВСЕ занятые IP со ВСЕХ облаков для каждой общей сети
+    for cloud_name, client in vcd_clients.items():
+        config = CLOUDS_CONFIG[cloud_name]
+        try:
             for pool_config in config["pools"]:
-                if pool_config["network"] in networks:
+                network = pool_config["network"]
+                
+                # Если это общий пул ИЛИ его сеть используется в другом облаке как общая
+                if network in shared_networks:
                     allocations = client.get_pool_used_ips(pool_config)
-                    for alloc in allocations:
-                        shared_pool_ips[group_key].add(alloc.ip_address)
-                    logger.info(f"Added {len(allocations)} IPs from {cloud_name}/{pool_config['name']} to group {group_key}")
+                    for allocation in allocations:
+                        shared_pool_ips[network].add(allocation.ip_address)
+                    
+                    logger.info(
+                        f"Cloud {cloud_name}, pool {pool_config['name']}: "
+                        f"added {len(allocations)} IPs to shared pool {network}"
+                    )
+        except Exception as e:
+            logger.error(f"Error collecting shared pool IPs from {cloud_name}: {e}")
+    
+    # Логируем итоговую статистику
+    for network, ips in shared_pool_ips.items():
+        logger.info(f"Shared network {network}: total {len(ips)} used IPs across all clouds")
     
     return shared_pool_ips
 
@@ -415,17 +421,16 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
                     
                     # ИСПРАВЛЕНИЕ БАГА: Определяем занятые IP правильно
                     network = pool_config["network"]
-                    used_ips_set = set(a.ip_address for a in pool_allocations)  # Локальные по умолчанию
-                    
-                    # Проверяем, есть ли группа для этой сети (overlapping или shared)
-                    for group_key, ips in shared_pool_used_ips.items():
-                        if ipaddress.ip_network(network).subnet_of(ipaddress.ip_network(group_key)) or network == group_key:
-                            used_ips_set = ips  # Используем глобальные used_ips из группы
-                            logger.info(
-                                f"Pool {pool_config['name']} in {cloud_name}: "
-                                f"using {len(used_ips_set)} globally used IPs from group {group_key}"
-                            )
-                            break
+                    if network in shared_pool_used_ips:
+                        # Для общего пула используем ГЛОБАЛЬНЫЕ занятые IP
+                        used_ips_set = shared_pool_used_ips[network]
+                        logger.info(
+                            f"Pool {pool_config['name']} in {cloud_name}: "
+                            f"using {len(used_ips_set)} globally used IPs for shared network {network}"
+                        )
+                    else:
+                        # Для независимого пула только локальные IP
+                        used_ips_set = set(a.ip_address for a in pool_allocations)
                     
                     # Рассчитываем свободные IP
                     free_ips, total, used, free = IPCalculator.calculate_free_ips(
