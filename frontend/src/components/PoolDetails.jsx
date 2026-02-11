@@ -46,10 +46,10 @@ const PoolDetails = ({ data }) => {
       </div>
 
       <div className="details-grid">
-        {data.clouds.map((cloud, cloudIndex) => (
-          <div key={cloudIndex} className="cloud-details">
+        {data.clouds.map((cloud) => (
+          <div key={cloud.cloud_name} className="cloud-details">
             <h3 className="cloud-name">{cloud.cloud_name.toUpperCase()}</h3>
-            
+
             <div className="pools-table">
               <table>
                 <thead>
@@ -64,8 +64,8 @@ const PoolDetails = ({ data }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {cloud.pools.map((pool, poolIndex) => (
-                    <tr key={poolIndex}>
+                  {cloud.pools.map((pool) => (
+                    <tr key={`${cloud.cloud_name}-${pool.name}`}>
                       <td className="pool-name-cell">{pool.name}</td>
                       <td>
                         <span className="network-badge">{pool.network}</span>
@@ -76,26 +76,26 @@ const PoolDetails = ({ data }) => {
                       <td>
                         <div className="usage-cell">
                           <div className="usage-bar-mini">
-                            <div 
+                            <div
                               className="usage-fill-mini"
                               style={{
-                                width: `${pool.usage_percentage}%`,
-                                backgroundColor: getUsageColor(pool.usage_percentage)
+                                width: `${pool.usage_percentage ?? 0}%`,
+                                backgroundColor: getUsageColor(pool.usage_percentage ?? 0)
                               }}
                             />
                           </div>
                           <span className="usage-percentage">
-                            {pool.usage_percentage.toFixed(1)}%
+                            {(pool.usage_percentage ?? 0).toFixed(1)}%
                           </span>
                         </div>
                       </td>
                       <td>
-                        {pool.usage_percentage > 80 ? (
+                        {(pool.usage_percentage ?? 0) > 80 ? (
                           <span className="status-badge critical">
                             <TrendingUp size={14} />
                             Critical
                           </span>
-                        ) : pool.usage_percentage > 50 ? (
+                        ) : (pool.usage_percentage ?? 0) > 50 ? (
                           <span className="status-badge warning">
                             <TrendingUp size={14} />
                             Warning
@@ -120,7 +120,7 @@ const PoolDetails = ({ data }) => {
               </div>
               <div className="summary-item">
                 <span className="summary-label">Overall Usage:</span>
-                <span className="summary-value">{cloud.usage_percentage.toFixed(1)}%</span>
+                <span className="summary-value">{(cloud.usage_percentage ?? 0).toFixed(1)}%</span>
               </div>
               <div className="summary-item">
                 <span className="summary-label">Available IPs:</span>

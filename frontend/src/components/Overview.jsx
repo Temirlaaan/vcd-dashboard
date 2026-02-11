@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cloud, Server, Activity } from 'lucide-react';
+import { Cloud } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import './Overview.css';
 
@@ -22,7 +22,7 @@ const Overview = ({ data }) => {
   return (
     <div className="overview-container">
       <h2 className="section-title">Cloud Infrastructure Overview</h2>
-      
+
       <div className="overview-grid">
         <div className="chart-section">
           <h3>IP Usage Distribution</h3>
@@ -39,7 +39,7 @@ const Overview = ({ data }) => {
                 dataKey="value"
               >
                 {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  <Cell key={`cell-${entry.name}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
               <Tooltip />
@@ -49,8 +49,8 @@ const Overview = ({ data }) => {
         </div>
 
         <div className="clouds-section">
-          {data.clouds.map((cloud, index) => (
-            <div key={index} className="cloud-card">
+          {data.clouds.map((cloud) => (
+            <div key={cloud.cloud_name} className="cloud-card">
               <div className="cloud-header">
                 <div className="cloud-title">
                   <Cloud className="cloud-icon" />
@@ -69,19 +69,19 @@ const Overview = ({ data }) => {
               </div>
 
               <div className="pools-list">
-                {cloud.pools.map((pool, poolIndex) => (
-                  <div key={poolIndex} className="pool-item">
+                {cloud.pools.map((pool) => (
+                  <div key={`${cloud.cloud_name}-${pool.name}`} className="pool-item">
                     <div className="pool-info">
                       <div className="pool-name">{pool.name}</div>
                       <div className="pool-network">{pool.network}</div>
                     </div>
                     <div className="pool-usage">
                       <div className="usage-bar">
-                        <div 
-                          className={`usage-fill ${getUsageClass(pool.usage_percentage)}`}
-                          style={{ width: `${pool.usage_percentage}%` }}
+                        <div
+                          className={`usage-fill ${getUsageClass(pool.usage_percentage ?? 0)}`}
+                          style={{ width: `${pool.usage_percentage ?? 0}%` }}
                         >
-                          <span className="usage-text">{pool.usage_percentage.toFixed(1)}%</span>
+                          <span className="usage-text">{(pool.usage_percentage ?? 0).toFixed(1)}%</span>
                         </div>
                       </div>
                       <div className="usage-details">

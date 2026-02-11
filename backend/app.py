@@ -1,4 +1,5 @@
 # backend/app.py
+import asyncio
 from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -10,7 +11,8 @@ from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
 import http.client
-import ipaddress  # Добавлен импорт для ipaddress
+import ipaddress
+from concurrent.futures import ThreadPoolExecutor
 
 # Увеличиваем лимит заголовков для обработки больших ответов от VCD
 http.client._MAXHEADERS = 1000
@@ -19,14 +21,15 @@ from vcd_client import VCDClient
 from ip_calculator import IPCalculator
 from models import DashboardData, CloudStats, IPPool, IPAllocation, IPConflict
 from keycloak_auth import (
-    get_current_active_user, 
-    login_user, 
+    get_current_active_user,
+    login_user,
     refresh_token as refresh_keycloak_token,
     logout_user,
     KeycloakUser,
     exchange_code_for_token
 )
 from redis_cache import cache
+from clouds_config import CLOUDS_CONFIG
 from pydantic import BaseModel
 
 # Настройка логирования
@@ -39,114 +42,27 @@ logger = logging.getLogger(__name__)
 # Загружаем переменные окружения
 load_dotenv()
 
-app = FastAPI(title="VCD IP Manager", version="2.0.0")
+app = FastAPI(title="VCD IP Manager", version="2.1.0")
 
 # Настройка часового пояса (Астана/Алматы)
-LOCAL_TZ = pytz.timezone('Asia/Almaty')  # UTC+6
+LOCAL_TZ = pytz.timezone('Asia/Almaty')
 
-# CORS для фронтенда
+# Thread pool для блокирующих вызовов (Keycloak, VCD API)
+executor = ThreadPoolExecutor(max_workers=4)
+
+# CORS — ограничиваем до фронтенд-домена
+ALLOWED_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "https://vcd-public-ips.t-cloud.kz,http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Конфигурация облаков
-CLOUDS_CONFIG = {
-    "vcd": {
-        "url": os.getenv("VCD_URL"),
-        "api_version": os.getenv("VCD_API_VERSION", "38.0"),
-        "api_token": os.getenv("VCD_API_TOKEN"),
-        "pools": [
-            {
-                "id": "urn:vcloud:ipSpace:1bb7eae1-2d5c-4bb5-bfc4-ce82d7495c6a",
-                "name": "176.98.235.0/24",
-                "network": "176.98.235.0/24",
-                "type": "ipSpace",
-                "shared_with": []
-            },
-            {
-                "id": "urn:vcloud:ipSpace:8d23d064-2de6-41a3-9d23-8555599e9d10",
-                "name": "87.255.215.0/24",
-                "network": "87.255.215.0/24",
-                "type": "ipSpace",
-                "shared_with": ["vcd02"]
-            },
-            {
-                "id": "urn:vcloud:ipSpace:7315f883-a0e5-4c9c-860b-528c7830813a",
-                "name": "91.185.21.224/27",
-                "network": "91.185.21.224/27",
-                "type": "ipSpace",
-                "shared_with": ["vcd02"]
-            },
-            {
-                "id": "urn:vcloud:ipSpace:5f6a1f88-094d-4877-bb9d-ee01d79da29d",
-                "name": "IPS-37.17.178.208/28-internet",
-                "network": "37.17.178.208/28",
-                "type": "ipSpace",
-                "shared_with": []
-            }
-        ]
-    },
-    "vcd01": {
-        "url": os.getenv("VCD_URL_VCD01"),
-        "api_version": os.getenv("VCD_API_VERSION_VCD01", "37.0"),
-        "api_token": os.getenv("VCD_API_TOKEN_VCD01"),
-        "pools": [
-            {
-                "id": "urn:vcloud:network:7eecf17f-838d-4348-936d-4099f860e52c",
-                "name": "Internet",
-                "network": "37.208.43.0/24",
-                "type": "externalNetwork",
-                "shared_with": []
-            },
-            {
-                "id": "urn:vcloud:network:516d858b-9549-4352-929b-d75ab300ad00",
-                "name": "ALM01-Internet",
-                "network": "91.185.11.0/24",
-                "type": "externalNetwork",
-                "shared_with": []
-            }
-        ]
-    },
-    "vcd02": {
-        "url": os.getenv("VCD_URL_VCD02"),
-        "api_version": os.getenv("VCD_API_VERSION_VCD02", "37.0"),
-        "api_token": os.getenv("VCD_API_TOKEN_VCD02"),
-        "pools": [
-            {
-                "id": "urn:vcloud:network:2e11613a-8f32-41b6-9b76-6d3ff9e412e0",
-                "name": "ExtNet-176.98.235.0m25-INTERNET",
-                "network": "176.98.235.0/25",
-                "type": "externalNetwork",
-                "shared_with": []
-            },
-            {
-                "id": "urn:vcloud:network:88bfab4e-4dc7-4605-b0f9-d8648f785812",
-                "name": "ExtNet-87.255.215.0m24-INTERNET",
-                "network": "87.255.215.0/24",
-                "type": "externalNetwork",
-                "shared_with": ["vcd"]
-            },
-            {
-                "id": "urn:vcloud:network:08020a8d-eb23-4347-b434-72641e133836",
-                "name": "ExtNet-87.255.216.128m26-INTERNET-ESHDI",
-                "network": "87.255.216.128/26",
-                "type": "externalNetwork",
-                "shared_with": []
-            },
-            {
-                "id": "urn:vcloud:network:c054c18f-fbb1-4633-8d47-02fa431a5aab",
-                "name": "ExtNet-91.185.21.224m27-INTERNET",
-                "network": "91.185.21.224/27",
-                "type": "externalNetwork",
-                "shared_with": ["vcd"]
-            }
-        ]
-    }
-}
 
 # Инициализация клиентов
 vcd_clients = {}
@@ -162,78 +78,150 @@ for cloud_name, config in CLOUDS_CONFIG.items():
     else:
         logger.warning(f"Missing configuration for {cloud_name}")
 
+
 def get_local_time():
     """Получить текущее локальное время"""
     return datetime.now(LOCAL_TZ)
 
+
 def check_ip_conflicts(all_allocations: List[IPAllocation]) -> Dict[str, List[IPConflict]]:
-    """Проверяет конфликты IP адресов в рамках одного облака"""
+    """
+    Проверяет конфликты IP адресов:
+    1) Дубликаты внутри одного облака (DUPLICATE_IN_CLOUD)
+    2) Дубликаты между облаками в shared/overlapping пулах (CROSS_CLOUD_CONFLICT)
+    """
     conflicts = {}
-    
-    # Группируем аллокации по облакам
-    cloud_allocations = {}
+
+    # --- 1. Конфликты внутри одного облака ---
+    cloud_allocations: Dict[str, List[IPAllocation]] = {}
     for allocation in all_allocations:
-        if allocation.cloud_name not in cloud_allocations:
-            cloud_allocations[allocation.cloud_name] = []
-        cloud_allocations[allocation.cloud_name].append(allocation)
-    
-    # Проверяем конфликты внутри каждого облака
+        cloud_allocations.setdefault(allocation.cloud_name, []).append(allocation)
+
     for cloud_name, allocations in cloud_allocations.items():
-        ip_usage = {}
+        ip_usage: Dict[str, List[IPAllocation]] = {}
         for allocation in allocations:
-            ip = allocation.ip_address
-            if ip not in ip_usage:
-                ip_usage[ip] = []
-            ip_usage[ip].append(allocation)
-        
-        # Находим дубликаты в рамках одного облака
+            ip_usage.setdefault(allocation.ip_address, []).append(allocation)
+
         for ip, allocs in ip_usage.items():
             if len(allocs) > 1:
-                if ip not in conflicts:
-                    conflicts[ip] = []
-                conflicts[ip].append(
+                conflicts.setdefault(ip, []).append(
                     IPConflict(
                         ip_address=ip,
                         clouds=[cloud_name],
-                        pools=[a.pool_name for a in allocs],
-                        organizations=[a.org_name for a in allocs],
+                        pools=list({a.pool_name for a in allocs}),
+                        organizations=list({a.org_name for a in allocs}),
                         conflict_type="DUPLICATE_IN_CLOUD"
                     )
                 )
-    
+
+    # --- 2. Кросс-облачные конфликты в shared/overlapping пулах ---
+    # Строим группы пересекающихся сетей
+    pool_network_map = []  # [(cloud_name, pool_config, ip_network)]
+    for cname, cfg in CLOUDS_CONFIG.items():
+        for pool in cfg["pools"]:
+            try:
+                pool_network_map.append((cname, pool, ipaddress.ip_network(pool["network"])))
+            except ValueError:
+                continue
+
+    # Собираем группы сетей, которые пересекаются или явно связаны через shared_with
+    shared_groups: List[Set[str]] = []  # каждый элемент — множество (cloud_name, network)
+    for i, (c1, p1, n1) in enumerate(pool_network_map):
+        for j, (c2, p2, n2) in enumerate(pool_network_map):
+            if i >= j or c1 == c2:
+                continue
+            is_shared = (c2 in p1.get("shared_with", []) or
+                         c1 in p2.get("shared_with", []) or
+                         n1.overlaps(n2))
+            if is_shared:
+                pair = {(c1, p1["network"]), (c2, p2["network"])}
+                # Пробуем добавить в существующую группу
+                merged = False
+                for group in shared_groups:
+                    if group & pair:
+                        group |= pair
+                        merged = True
+                        break
+                if not merged:
+                    shared_groups.append(pair)
+
+    # Для каждой группы проверяем кросс-облачные дубликаты
+    for group in shared_groups:
+        clouds_in_group = {cn for cn, _ in group}
+        networks_in_group = {net for _, net in group}
+
+        # Собираем аллокации из этих облаков и этих сетей
+        group_allocs: Dict[str, List[IPAllocation]] = {}
+        for alloc in all_allocations:
+            if alloc.cloud_name in clouds_in_group:
+                # Проверяем, что IP принадлежит одной из сетей группы
+                for net_str in networks_in_group:
+                    try:
+                        net = ipaddress.ip_network(net_str)
+                        if ipaddress.ip_address(alloc.ip_address) in net:
+                            group_allocs.setdefault(alloc.ip_address, []).append(alloc)
+                            break
+                    except ValueError:
+                        continue
+
+        for ip, allocs in group_allocs.items():
+            unique_clouds = {a.cloud_name for a in allocs}
+            if len(unique_clouds) > 1:
+                conflicts.setdefault(ip, []).append(
+                    IPConflict(
+                        ip_address=ip,
+                        clouds=sorted(unique_clouds),
+                        pools=list({a.pool_name for a in allocs}),
+                        organizations=list({a.org_name for a in allocs}),
+                        conflict_type="CROSS_CLOUD_CONFLICT"
+                    )
+                )
+
     return conflicts
+
 
 def get_globally_used_ips_for_shared_pools() -> Dict[str, Set[str]]:
     """
     Получить ВСЕ занятые IP для общих пулов со всех облаков, включая пересекающиеся подсети.
     """
     shared_pool_ips = {}
-    
+
     # Собираем все networks из всех clouds
     all_networks = {}
     for cloud_name, config in CLOUDS_CONFIG.items():
         for pool in config["pools"]:
             network = pool["network"]
-            all_networks[network] = {
-                "cloud": cloud_name,
-                "pool_config": pool,
-                "ip_net": ipaddress.ip_network(network)
-            }
-    
+            try:
+                all_networks[network] = {
+                    "cloud": cloud_name,
+                    "pool_config": pool,
+                    "ip_net": ipaddress.ip_network(network)
+                }
+            except ValueError as e:
+                logger.error(f"Invalid network {network}: {e}")
+
     # Детектируем shared: explicit (shared_with) + overlaps
-    shared_networks = {}
-    for net1, info1 in all_networks.items():
-        for net2, info2 in all_networks.items():
-            if net1 != net2 and (info1["ip_net"].overlaps(info2["ip_net"]) or info1["pool_config"].get("shared_with") or info2["pool_config"].get("shared_with")):
-                # Объединяем в группу (key — наибольшая сеть)
-                group_key = str(max(info1["ip_net"], info2["ip_net"], key=lambda n: n.num_addresses))
-                if group_key not in shared_networks:
-                    shared_networks[group_key] = set()
-                shared_networks[group_key].add(net1)
-                shared_networks[group_key].add(net2)
-    
+    shared_networks: Dict[str, Set[str]] = {}
+    network_keys = list(all_networks.keys())
+    for i, net1 in enumerate(network_keys):
+        info1 = all_networks[net1]
+        for net2 in network_keys[i + 1:]:
+            info2 = all_networks[net2]
+            # Проверяем только реальные пересечения или явные shared_with
+            has_overlap = info1["ip_net"].overlaps(info2["ip_net"])
+            explicitly_shared = (
+                info2["cloud"] in info1["pool_config"].get("shared_with", []) or
+                info1["cloud"] in info2["pool_config"].get("shared_with", [])
+            )
+            if has_overlap or explicitly_shared:
+                # Группируем по наибольшей сети (детерминированно)
+                larger = max(info1["ip_net"], info2["ip_net"],
+                             key=lambda n: (n.num_addresses, int(n.network_address)))
+                group_key = str(larger)
+                shared_networks.setdefault(group_key, set()).update([net1, net2])
+
     logger.info(f"Found {len(shared_networks)} shared/overlapping network groups")
-    
+
     # Для каждой группы собираем used_ips со всех clouds
     for group_key, networks in shared_networks.items():
         shared_pool_ips[group_key] = set()
@@ -244,9 +232,13 @@ def get_globally_used_ips_for_shared_pools() -> Dict[str, Set[str]]:
                     allocations = client.get_pool_used_ips(pool_config)
                     for alloc in allocations:
                         shared_pool_ips[group_key].add(alloc.ip_address)
-                    logger.info(f"Added {len(allocations)} IPs from {cloud_name}/{pool_config['name']} to group {group_key}")
-    
+                    logger.info(
+                        f"Added {len(allocations)} IPs from "
+                        f"{cloud_name}/{pool_config['name']} to group {group_key}"
+                    )
+
     return shared_pool_ips
+
 
 # Модели для API
 class UserLogin(BaseModel):
@@ -262,13 +254,17 @@ class Token(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
+
 # ================== АВТОРИЗАЦИЯ ==================
 
 @app.post("/api/login", response_model=Token)
 async def login(user_login: UserLogin):
     """Вход в систему через Keycloak"""
     try:
-        token_data = login_user(user_login.username, user_login.password)
+        loop = asyncio.get_event_loop()
+        token_data = await loop.run_in_executor(
+            executor, login_user, user_login.username, user_login.password
+        )
         return token_data
     except HTTPException:
         raise
@@ -283,7 +279,10 @@ async def login(user_login: UserLogin):
 async def refresh(refresh_request: RefreshTokenRequest):
     """Обновление токена"""
     try:
-        token_data = refresh_keycloak_token(refresh_request.refresh_token)
+        loop = asyncio.get_event_loop()
+        token_data = await loop.run_in_executor(
+            executor, refresh_keycloak_token, refresh_request.refresh_token
+        )
         return token_data
     except HTTPException:
         raise
@@ -301,11 +300,11 @@ async def logout(
 ):
     """Выход из системы"""
     try:
-        logout_user(refresh_request.refresh_token)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(executor, logout_user, refresh_request.refresh_token)
         return {"message": "Successfully logged out"}
     except Exception as e:
         logger.error(f"Logout error: {e}")
-        # Не выбрасываем исключение, т.к. токен может быть уже невалидным
         return {"message": "Logged out (with warnings)"}
 
 @app.get("/api/verify")
@@ -322,11 +321,15 @@ async def verify_token(current_user: KeycloakUser = Depends(get_current_active_u
 async def keycloak_callback(code: str = Query(...)):
     """Обмен code на token после редиректа от Keycloak"""
     try:
-        token_data = exchange_code_for_token(code)
+        loop = asyncio.get_event_loop()
+        token_data = await loop.run_in_executor(executor, exchange_code_for_token, code)
         return token_data
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Callback error: {e}")
         raise HTTPException(status_code=401, detail="Authorization failed")
+
 
 # ================== ПУБЛИЧНЫЕ ЭНДПОИНТЫ ==================
 
@@ -336,13 +339,13 @@ async def root():
     html_path = Path(__file__).parent.parent / "frontend" / "index.html"
     if html_path.exists():
         return FileResponse(html_path)
-    return {"message": "VCD IP Manager API v2.0"}
+    return {"message": "VCD IP Manager API v2.1"}
 
 @app.get("/api/health")
 async def health_check():
     """Проверка состояния API (публичный)"""
     redis_stats = cache.get_stats()
-    
+
     return {
         "status": "healthy",
         "timestamp": get_local_time().isoformat(),
@@ -351,95 +354,101 @@ async def health_check():
         "redis": redis_stats
     }
 
+
 # ================== ЗАЩИЩЕННЫЕ ЭНДПОИНТЫ ==================
 
 @app.get("/api/dashboard", response_model=DashboardData)
 async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_active_user)):
     """Получить все данные для дашборда (требует авторизации)"""
-    
-    # Пытаемся получить из кеша
+
+    # Пытаемся получить из кеша и валидировать как Pydantic-модель
     cache_key = "dashboard_data"
     cached_data = cache.get(cache_key)
-    
+
     if cached_data:
-        logger.info(f"Dashboard data loaded from cache for user {current_user.username}")
-        return cached_data
-    
+        try:
+            dashboard = DashboardData(**cached_data)
+            logger.info(f"Dashboard data loaded from cache for user {current_user.username}")
+            return dashboard
+        except Exception as e:
+            logger.warning(f"Invalid cached data, refreshing: {e}")
+
     try:
         all_clouds_stats = []
         all_allocations = []
         total_ips_count = 0
         used_ips_count = 0
         free_ips_count = 0
-        
-        # ИСПРАВЛЕНИЕ БАГА: Сначала собираем занятые IP для общих пулов
+
+        # Собираем занятые IP для shared/overlapping пулов
         logger.info("Collecting used IPs for shared pools across all clouds...")
-        shared_pool_used_ips = get_globally_used_ips_for_shared_pools()
-        
+        loop = asyncio.get_event_loop()
+        shared_pool_used_ips = await loop.run_in_executor(
+            executor, get_globally_used_ips_for_shared_pools
+        )
+
         # Собираем все аллокации для проверки конфликтов
         for cloud_name, client in vcd_clients.items():
             config = CLOUDS_CONFIG[cloud_name]
             pools = config["pools"]
-            
+
             try:
                 cloud_allocations = client.get_all_used_ips(pools)
                 all_allocations.extend(cloud_allocations)
             except Exception as e:
                 logger.error(f"Error collecting allocations from {cloud_name}: {e}")
-        
-        # Проверяем конфликты (только в рамках одного облака)
+
+        # Проверяем конфликты (внутри облака + кросс-облачные)
         conflicts = check_ip_conflicts(all_allocations)
         if conflicts:
             logger.warning(f"Found {len(conflicts)} IP conflicts!")
             for ip, conflict_list in conflicts.items():
                 for conflict in conflict_list:
-                    logger.warning(f"Conflict in {conflict.clouds[0]}: IP {ip} used in pools: {', '.join(conflict.pools)}")
-        
+                    logger.warning(
+                        f"Conflict [{conflict.conflict_type}]: IP {ip} "
+                        f"in clouds: {conflict.clouds}, pools: {conflict.pools}"
+                    )
+
         # Обрабатываем каждое облако
         for cloud_name, client in vcd_clients.items():
             config = CLOUDS_CONFIG[cloud_name]
             pools = config["pools"]
-            
+
             try:
-                # Получаем аллокации только для этого облака
-                cloud_allocations = [a for a in all_allocations if a.cloud_name == cloud_name]
-                
+                cloud_allocs = [a for a in all_allocations if a.cloud_name == cloud_name]
+
                 cloud_pools = []
                 cloud_total_ips = 0
                 cloud_used_ips = 0
                 cloud_free_ips = 0
-                
+
                 for pool_config in pools:
-                    # Получаем аллокации для этого пула
-                    pool_allocations = [a for a in cloud_allocations if a.pool_name == pool_config["name"]]
-                    
-                    # ИСПРАВЛЕНИЕ БАГА: Определяем занятые IP правильно
+                    pool_allocations = [a for a in cloud_allocs if a.pool_name == pool_config["name"]]
+
                     network = pool_config["network"]
-                    used_ips_set = set(a.ip_address for a in pool_allocations)  # Локальные по умолчанию
-                    
-                    # Проверяем, есть ли группа для этой сети (overlapping или shared)
+                    used_ips_set = set(a.ip_address for a in pool_allocations)
+
+                    # Если пул shared/overlapping — берем глобальные used IPs
                     for group_key, ips in shared_pool_used_ips.items():
-                        if ipaddress.ip_network(network).subnet_of(ipaddress.ip_network(group_key)) or network == group_key:
-                            used_ips_set = ips  # Используем глобальные used_ips из группы
-                            logger.info(
-                                f"Pool {pool_config['name']} in {cloud_name}: "
-                                f"using {len(used_ips_set)} globally used IPs from group {group_key}"
-                            )
-                            break
-                    
-                    # Рассчитываем свободные IP
-                    free_ips, total, used, free = IPCalculator.calculate_free_ips(
-                        network,
-                        used_ips_set
+                        try:
+                            pool_net = ipaddress.ip_network(network)
+                            group_net = ipaddress.ip_network(group_key)
+                            if pool_net.subnet_of(group_net) or network == group_key:
+                                used_ips_set = ips
+                                break
+                        except ValueError:
+                            continue
+
+                    free_ips_list, total, used, free = IPCalculator.calculate_free_ips(
+                        network, used_ips_set
                     )
-                    
-                    # Проверяем конфликты для этого пула
+
+                    # Конфликты для этого пула
                     pool_conflicts = []
                     for allocation in pool_allocations:
                         if allocation.ip_address in conflicts:
                             pool_conflicts.extend(conflicts[allocation.ip_address])
-                    
-                    # Создаем объект пула
+
                     pool = IPPool(
                         name=pool_config["name"],
                         network=network,
@@ -449,92 +458,96 @@ async def get_dashboard_data(current_user: KeycloakUser = Depends(get_current_ac
                         free_ips=free,
                         usage_percentage=round((used / total * 100) if total > 0 else 0, 2),
                         used_addresses=pool_allocations,
-                        free_addresses=free_ips[:100] if len(free_ips) > 100 else free_ips,
-                        has_overlaps=network in shared_pool_used_ips,
+                        free_addresses=free_ips_list[:100],
+                        has_overlaps=any(
+                            network in nets for nets in shared_pool_used_ips.values()
+                        ),
                         overlapping_clouds=pool_config.get("shared_with", []),
                         conflicts=pool_conflicts if pool_conflicts else None
                     )
-                    
+
                     cloud_pools.append(pool)
                     cloud_total_ips += total
                     cloud_used_ips += used
                     cloud_free_ips += free
-                
-                # Создаем статистику облака
+
                 cloud_stats = CloudStats(
                     cloud_name=cloud_name,
                     total_pools=len(pools),
                     total_ips=cloud_total_ips,
                     used_ips=cloud_used_ips,
                     free_ips=cloud_free_ips,
-                    usage_percentage=round((cloud_used_ips / cloud_total_ips * 100) if cloud_total_ips > 0 else 0, 2),
+                    usage_percentage=round(
+                        (cloud_used_ips / cloud_total_ips * 100) if cloud_total_ips > 0 else 0, 2
+                    ),
                     pools=cloud_pools
                 )
-                
+
                 all_clouds_stats.append(cloud_stats)
-                
-                # Для общей статистики учитываем только независимые пулы
+
+                # Считаем общую статистику (уникальные сети)
                 counted_networks = set()
                 for pool_config in pools:
                     network = pool_config["network"]
-                    # Считаем только если сеть еще не учтена
                     if network not in counted_networks:
                         pool_stats = next(p for p in cloud_pools if p.name == pool_config["name"])
                         total_ips_count += pool_stats.total_ips
                         used_ips_count += pool_stats.used_ips
                         free_ips_count += pool_stats.free_ips
                         counted_networks.add(network)
-                
+
             except Exception as e:
                 logger.error(f"Error processing cloud {cloud_name}: {e}")
                 continue
-        
-        # Формируем итоговый ответ
+
         dashboard = DashboardData(
             last_update=get_local_time(),
             total_clouds=len(all_clouds_stats),
             total_ips=total_ips_count,
             used_ips=used_ips_count,
             free_ips=free_ips_count,
-            usage_percentage=round((used_ips_count / total_ips_count * 100) if total_ips_count > 0 else 0, 2),
+            usage_percentage=round(
+                (used_ips_count / total_ips_count * 100) if total_ips_count > 0 else 0, 2
+            ),
             clouds=all_clouds_stats,
             all_allocations=all_allocations,
             conflicts=conflicts if conflicts else {}
         )
-        
-        # Сохраняем в кеш
-        cache.set(cache_key, dashboard.dict(), ttl=300)  # 5 минут
+
+        # Кешируем JSON-сериализованные данные через Pydantic
+        cache.set(cache_key, dashboard.dict(), ttl=300)
         logger.info(f"Dashboard data cached for user {current_user.username}")
-        
+
         return dashboard
-        
+
     except Exception as e:
         logger.error(f"Error getting dashboard data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/conflicts")
 async def get_ip_conflicts(current_user: KeycloakUser = Depends(get_current_active_user)):
     """Получить список конфликтующих IP адресов (требует авторизации)"""
     try:
         all_allocations = []
-        
-        # Собираем все аллокации
+
         for cloud_name, client in vcd_clients.items():
             config = CLOUDS_CONFIG[cloud_name]
             allocations = client.get_all_used_ips(config["pools"])
             all_allocations.extend(allocations)
-        
+
         conflicts = check_ip_conflicts(all_allocations)
-        
+
         return {
             "total_conflicts": len(conflicts),
             "conflicts": conflicts,
             "timestamp": get_local_time()
         }
-        
+
     except Exception as e:
         logger.error(f"Error checking conflicts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/cache/clear")
 async def clear_cache(current_user: KeycloakUser = Depends(get_current_active_user)):
@@ -546,6 +559,7 @@ async def clear_cache(current_user: KeycloakUser = Depends(get_current_active_us
     except Exception as e:
         logger.error(f"Error clearing cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
