@@ -8,23 +8,26 @@ const Login = ({ onLogin }) => {
   const handleKeycloakLogin = () => {
     setError('');
     try {
-      // Получаем конфиг из env или hardcoded (рекомендую добавить в .env: REACT_APP_KEYCLOAK_URL, etc.)
       const keycloakUrl = process.env.REACT_APP_KEYCLOAK_URL || 'https://sso-ttc.t-cloud.kz';
       const realm = process.env.REACT_APP_KEYCLOAK_REALM || 'prod-v1';
       const clientId = process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'vcd-ip-manager';
-      const redirectUri = encodeURIComponent(`${window.location.origin}/callback`);  // Динамический redirect
+      const redirectUri = `${window.location.origin}/callback`;
 
-      const authUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid profile email`;
-      
-      console.log('Redirecting to Keycloak:', authUrl);
-      window.location.href = authUrl;  // Редирект на Keycloak login page
+      const authUrl = (
+        `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth` +
+        `?client_id=${encodeURIComponent(clientId)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&response_type=code` +
+        `&scope=openid%20profile%20email`
+      );
+
+      window.location.href = authUrl;
     } catch (err) {
       setError('Failed to initiate login. Please try again.');
       console.error('Keycloak redirect error:', err);
     }
   };
 
-  // Стили (вставьте ваши стили из оригинала, упростил без password/username inputs)
   const styles = {
     container: {
       minHeight: '100vh',
@@ -67,15 +70,8 @@ const Login = ({ onLogin }) => {
       marginBottom: '30px',
       fontSize: '14px',
       color: '#64748b',
-      width: '100%', // Ensure it spans the full width of the parent
-      display: 'block', // Ensure it's a block element for consistent centering
-      marginLeft: 'auto', // Explicitly center horizontally
-      marginRight: 'auto',
-    },
-    form: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '20px',
+      width: '100%',
+      display: 'block',
     },
     errorBox: {
       background: '#fef2f2',
@@ -89,11 +85,12 @@ const Login = ({ onLogin }) => {
       fontSize: '14px',
       maxHeight: '150px',
       overflow: 'auto',
+      marginBottom: '20px',
     },
     errorIcon: {
       width: '18px',
       height: '18px',
-      flexShrink: '0',
+      flexShrink: 0,
       marginTop: '2px',
     },
     errorText: {
@@ -101,21 +98,21 @@ const Login = ({ onLogin }) => {
       wordBreak: 'break-word',
     },
     submitButton: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    color: 'white',
-    border: 'none',
-    borderRadius: '10px',
-    padding: '14px',
-    fontSize: '16px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px',
-    width: '100%',           // 👈 добавь это
-    boxSizing: 'border-box', // 👈 на всякий случай для корректных отступов
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      color: 'white',
+      border: 'none',
+      borderRadius: '10px',
+      padding: '14px',
+      fontSize: '16px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      transition: 'all 0.3s ease',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '10px',
+      width: '100%',
+      boxSizing: 'border-box',
     },
     footer: {
       marginTop: '30px',
@@ -131,26 +128,26 @@ const Login = ({ onLogin }) => {
         <div style={styles.logo}>
           <Lock style={styles.logoIcon} />
         </div>
-        
+
         <h1 style={styles.title}>VCD IP Manager</h1>
         <p style={styles.subtitle}>Sign in with Keycloak to access the dashboard</p>
-        
+
         {error && (
           <div style={styles.errorBox}>
             <AlertCircle style={styles.errorIcon} />
             <div style={styles.errorText}>{error}</div>
           </div>
         )}
-        
+
         <button
           type="button"
           style={styles.submitButton}
           onClick={handleKeycloakLogin}
         >
-          <Lock style={styles.lockIcon} />
+          <Lock size={18} />
           Sign In with Keycloak
         </button>
-        
+
         <div style={styles.footer}>
           <p>VMware vCloud Director IP Management System</p>
         </div>

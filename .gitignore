@@ -6,3 +6,22 @@ frontend/node_modules/
 *env
 frontend/nginx/logs/
 backend/logs
+
+# Backup files
+*.backup
+*_backup_*
+*_copy
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+*.db

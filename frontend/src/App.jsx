@@ -1,5 +1,5 @@
 // frontend/src/App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
 import Login from './components/Login';
@@ -28,57 +28,57 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [refreshToken, setRefreshToken] = useState(null);  // Новый state для refresh_token
-
-  // Проверка токена при загрузке + обработка callback
-  useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    const storedRefresh = localStorage.getItem('refresh_token');
-    if (token) {
-      setRefreshToken(storedRefresh);
-      verifyToken(token);
-    } else {
-      handleCallback();  // Проверяем, если это callback URL
-      setLoading(false);
-    }
-  }, []);
-
-  // Обработка callback (если URL содержит ?code=)
-  const handleCallback = async () => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    if (code) {
-      try {
-        setLoading(true);
-        const response = await axios.get(`${API_BASE_URL}/api/callback?code=${code}`);
-        const { access_token, refresh_token } = response.data;
-        
-        localStorage.setItem('access_token', access_token);
-        localStorage.setItem('refresh_token', refresh_token);
-        setRefreshToken(refresh_token);
-        
-        // Очищаем URL от params
-        window.history.replaceState({}, document.title, "/");
-        
-        setupAxios(access_token);
-        setIsAuthenticated(true);
-        await loadDashboardData();
-      } catch (err) {
-        setError('Failed to exchange code for token.');
-        console.error('Callback error:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
+  const [refreshToken, setRefreshToken] = useState(null);
 
   // Настройка axios с токеном
-  const setupAxios = (token) => {
+  const setupAxios = useCallback((token) => {
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-  };
+  }, []);
+
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setError(null);
+      const response = await axios.get(`${API_BASE_URL}/api/dashboard`);
+      setDashboardData(response.data);
+
+      if (response.data.conflicts && Object.keys(response.data.conflicts).length > 0) {
+        setShowConflicts(true);
+      }
+    } catch (err) {
+      if (err.response && err.response.status === 401) {
+        handleLogout();
+      } else {
+        setError('Failed to load data. Please check if the backend is running.');
+        console.error('Error loading dashboard data:', err);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []); // handleLogout is stable — defined below
+
+  // Обработка выхода
+  const handleLogout = useCallback(async () => {
+    const storedRefresh = localStorage.getItem('refresh_token');
+    if (storedRefresh) {
+      try {
+        await axios.post(`${API_BASE_URL}/api/logout`, { refresh_token: storedRefresh });
+      } catch (err) {
+        console.error('Logout error:', err);
+      }
+    }
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    delete axios.defaults.headers.common['Authorization'];
+    setIsAuthenticated(false);
+    setDashboardData(null);
+    setCurrentUser(null);
+    setRefreshToken(null);
+    setLoading(false);
+  }, []);
 
   // Проверка валидности токена
-  const verifyToken = async (token) => {
+  const verifyToken = useCallback(async (token) => {
     try {
       setupAxios(token);
       const response = await axios.get(`${API_BASE_URL}/api/verify`);
@@ -93,49 +93,82 @@ function App() {
       console.error('Token verification failed:', err);
       handleLogout();
     }
-  };
+  }, [setupAxios, loadDashboardData, handleLogout]);
 
-  // Обработка входа (теперь не используется напрямую, но оставил для fallback)
+  // Обработка callback (если URL содержит ?code=)
+  const handleCallback = useCallback(async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    if (!code) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/api/callback?code=${encodeURIComponent(code)}`);
+      const { access_token, refresh_token } = response.data;
+
+      localStorage.setItem('access_token', access_token);
+      if (refresh_token) {
+        localStorage.setItem('refresh_token', refresh_token);
+      }
+      setRefreshToken(refresh_token);
+
+      // Очищаем URL от params
+      window.history.replaceState({}, document.title, '/');
+
+      setupAxios(access_token);
+      setIsAuthenticated(true);
+      await loadDashboardData();
+    } catch (err) {
+      setError('Failed to exchange code for token.');
+      console.error('Callback error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [setupAxios, loadDashboardData]);
+
+  // Проверка токена при загрузке + обработка callback
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    const storedRefresh = localStorage.getItem('refresh_token');
+    if (token) {
+      setRefreshToken(storedRefresh);
+      verifyToken(token);
+    } else {
+      // handleCallback сам управляет loading state
+      handleCallback();
+    }
+  }, [verifyToken, handleCallback]);
+
+  // Обработка входа (fallback для username/password)
   const handleLogin = (tokenData) => {
     localStorage.setItem('access_token', tokenData.access_token);
-    localStorage.setItem('refresh_token', tokenData.refresh_token);
+    if (tokenData.refresh_token) {
+      localStorage.setItem('refresh_token', tokenData.refresh_token);
+    }
     setRefreshToken(tokenData.refresh_token);
     setupAxios(tokenData.access_token);
     setIsAuthenticated(true);
     loadDashboardData();
   };
 
-  // Обработка выхода с инвалидацией refresh_token
-  const handleLogout = async () => {
-    if (refreshToken) {
-      try {
-        await axios.post(`${API_BASE_URL}/api/logout`, { refresh_token: refreshToken });
-      } catch (err) {
-        console.error('Logout error:', err);
-      }
-    }
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    delete axios.defaults.headers.common['Authorization'];
-    setIsAuthenticated(false);
-    setDashboardData(null);
-    setCurrentUser(null);
-    setRefreshToken(null);
-    setLoading(false);
-  };
-
-  // Refresh токена
+  // Refresh токена + данных
   const handleRefresh = async () => {
-    if (refreshToken) {
+    const currentRefresh = refreshToken || localStorage.getItem('refresh_token');
+    if (currentRefresh) {
       try {
         setRefreshing(true);
-        const response = await axios.post(`${API_BASE_URL}/api/refresh`, { refresh_token: refreshToken });
+        const response = await axios.post(`${API_BASE_URL}/api/refresh`, {
+          refresh_token: currentRefresh
+        });
         const { access_token, refresh_token: newRefresh } = response.data;
-        
+
         localStorage.setItem('access_token', access_token);
         if (newRefresh) localStorage.setItem('refresh_token', newRefresh);
-        setRefreshToken(newRefresh || refreshToken);
-        
+        setRefreshToken(newRefresh || currentRefresh);
+
         setupAxios(access_token);
         await loadDashboardData();
       } catch (err) {
@@ -149,30 +182,6 @@ function App() {
     }
   };
 
-  const loadDashboardData = async () => {
-    try {
-      setError(null);
-      const response = await axios.get(`${API_BASE_URL}/api/dashboard`);
-      setDashboardData(response.data);
-      
-      // Проверяем наличие конфликтов
-      if (response.data.conflicts && Object.keys(response.data.conflicts).length > 0) {
-        setShowConflicts(true);
-      }
-    } catch (err) {
-      if (err.response && err.response.status === 401) {
-        // Token expired or invalid
-        handleLogout();
-      } else {
-        setError('Failed to load data. Please check if the backend is running.');
-        console.error('Error loading dashboard data:', err);
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setMobileMenuOpen(false);
@@ -180,7 +189,7 @@ function App() {
 
   const renderContent = () => {
     if (!dashboardData) return null;
-    
+
     switch (activeTab) {
       case 'overview':
         return <Overview data={dashboardData} />;
@@ -196,6 +205,7 @@ function App() {
   };
 
   if (!isAuthenticated) {
+    if (loading) return <LoadingSpinner />;
     return <Login onLogin={handleLogin} />;
   }
 
@@ -211,12 +221,10 @@ function App() {
 
   return (
     <div className="app">
-      {/* Mobile menu overlay */}
       {mobileMenuOpen && (
         <div className="mobile-overlay" onClick={() => setMobileMenuOpen(false)} />
       )}
 
-      {/* Sidebar */}
       <Sidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -227,12 +235,10 @@ function App() {
         hasConflicts={hasConflicts}
       />
 
-      {/* Main Content */}
       <div className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        {/* Header */}
         <header className="app-header">
           <div className="header-left">
-            <button 
+            <button
               className="mobile-menu-toggle"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
@@ -245,10 +251,10 @@ function App() {
           </div>
           <div className="header-right">
             {hasConflicts && (
-              <button 
+              <button
                 className="conflict-indicator"
                 onClick={() => setShowConflicts(!showConflicts)}
-                title={`${Object.keys(dashboardData.conflicts).length} IP конфликтов обнаружено`}
+                title={`${Object.keys(dashboardData.conflicts).length} IP conflicts detected`}
               >
                 <AlertTriangle />
                 <span>{Object.keys(dashboardData.conflicts).length}</span>
@@ -256,7 +262,7 @@ function App() {
             )}
             {dashboardData && (
               <div className="last-update">
-                Обновлено: {formatTime(dashboardData.last_update)}
+                Updated: {formatTime(dashboardData.last_update)}
               </div>
             )}
             {currentUser && (
@@ -265,34 +271,32 @@ function App() {
                 <span className="user-name">{currentUser}</span>
               </div>
             )}
-            <button 
+            <button
               className={`refresh-button ${refreshing ? 'refreshing' : ''}`}
               onClick={handleRefresh}
               disabled={refreshing}
             >
               <RefreshCw className={`refresh-icon ${refreshing ? 'spinning' : ''}`} />
-              <span className="refresh-text">{refreshing ? 'Обновление...' : 'Обновить'}</span>
+              <span className="refresh-text">{refreshing ? 'Updating...' : 'Refresh'}</span>
             </button>
-            <button 
+            <button
               className="logout-button"
               onClick={handleLogout}
-              title="Выйти"
+              title="Logout"
             >
               <LogOut size={18} />
-              <span className="logout-text">Выйти</span>
+              <span className="logout-text">Logout</span>
             </button>
           </div>
         </header>
 
-        {/* Conflict Alert */}
         {showConflicts && hasConflicts && (
-          <ConflictAlert 
+          <ConflictAlert
             conflicts={dashboardData.conflicts}
             onClose={() => setShowConflicts(false)}
           />
         )}
 
-        {/* Content Area */}
         <div className="content-wrapper">
           {dashboardData ? (
             <>

@@ -9,7 +9,7 @@ const AllocatedIPs = ({ data }) => {
   const [sortDirection, setSortDirection] = useState('asc');
 
   const filteredAndSortedData = useMemo(() => {
-    let filtered = data.all_allocations;
+    let filtered = [...data.all_allocations];
 
     // Apply search filter
     if (searchTerm) {
@@ -29,17 +29,15 @@ const AllocatedIPs = ({ data }) => {
 
     // Apply sorting
     filtered.sort((a, b) => {
-      let aVal = a[sortField] || '';
-      let bVal = b[sortField] || '';
-      
+      let aVal = a[sortField] ?? '';
+      let bVal = b[sortField] ?? '';
+
       if (typeof aVal === 'string') aVal = aVal.toLowerCase();
       if (typeof bVal === 'string') bVal = bVal.toLowerCase();
-      
-      if (sortDirection === 'asc') {
-        return aVal > bVal ? 1 : -1;
-      } else {
-        return aVal < bVal ? 1 : -1;
-      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
     });
 
     return filtered;
@@ -64,18 +62,21 @@ const AllocatedIPs = ({ data }) => {
       item.allocation_type,
       item.entity_name || ''
     ]);
-    
+
+    const escapeCell = (cell) => `"${String(cell).replace(/"/g, '""')}"`;
+
     const csvContent = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ...rows.map(row => row.map(escapeCell).join(','))
     ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `allocated_ips_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
+    window.URL.revokeObjectURL(url);
   };
 
   return (
@@ -99,7 +100,7 @@ const AllocatedIPs = ({ data }) => {
             className="search-input"
           />
         </div>
-        
+
         <div className="filter-group">
           <Filter className="filter-icon" />
           <select
@@ -128,25 +129,25 @@ const AllocatedIPs = ({ data }) => {
               <th onClick={() => handleSort('ip_address')} className="sortable">
                 IP Address
                 {sortField === 'ip_address' && (
-                  <span className="sort-indicator">{sortDirection === 'asc' ? ' ↑' : ' ↓'}</span>
+                  <span className="sort-indicator">{sortDirection === 'asc' ? ' \u2191' : ' \u2193'}</span>
                 )}
               </th>
               <th onClick={() => handleSort('org_name')} className="sortable">
                 Organization
                 {sortField === 'org_name' && (
-                  <span className="sort-indicator">{sortDirection === 'asc' ? ' ↑' : ' ↓'}</span>
+                  <span className="sort-indicator">{sortDirection === 'asc' ? ' \u2191' : ' \u2193'}</span>
                 )}
               </th>
               <th onClick={() => handleSort('cloud_name')} className="sortable">
                 Cloud
                 {sortField === 'cloud_name' && (
-                  <span className="sort-indicator">{sortDirection === 'asc' ? ' ↑' : ' ↓'}</span>
+                  <span className="sort-indicator">{sortDirection === 'asc' ? ' \u2191' : ' \u2193'}</span>
                 )}
               </th>
               <th onClick={() => handleSort('pool_name')} className="sortable">
                 Pool
                 {sortField === 'pool_name' && (
-                  <span className="sort-indicator">{sortDirection === 'asc' ? ' ↑' : ' ↓'}</span>
+                  <span className="sort-indicator">{sortDirection === 'asc' ? ' \u2191' : ' \u2193'}</span>
                 )}
               </th>
               <th>Type</th>
@@ -154,8 +155,8 @@ const AllocatedIPs = ({ data }) => {
             </tr>
           </thead>
           <tbody>
-            {filteredAndSortedData.map((allocation, index) => (
-              <tr key={index}>
+            {filteredAndSortedData.map((allocation) => (
+              <tr key={`${allocation.ip_address}-${allocation.cloud_name}-${allocation.pool_name}`}>
                 <td>
                   <span className="ip-address">{allocation.ip_address}</span>
                 </td>
@@ -183,7 +184,7 @@ const AllocatedIPs = ({ data }) => {
             ))}
           </tbody>
         </table>
-        
+
         {filteredAndSortedData.length === 0 && (
           <div className="no-results">
             No allocations found matching your criteria

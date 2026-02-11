@@ -1,8 +1,8 @@
 import React from 'react';
-import { Cloud, Eye, List, Grid, Database, ChevronLeft, ChevronRight, Activity, Shield, X } from 'lucide-react';
+import { Cloud, Eye, List, Grid, Database, ChevronLeft, ChevronRight, Activity, X } from 'lucide-react';
 import './Sidebar.css';
 
-const Sidebar = ({ activeTab, onTabChange, collapsed, onToggleCollapse, mobileMenuOpen, onCloseMobile }) => {
+const Sidebar = ({ activeTab, onTabChange, collapsed, onToggleCollapse, mobileMenuOpen, onCloseMobile, hasConflicts }) => {
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: <Eye />, description: 'General statistics' },
     { id: 'allocations', label: 'Allocated IPs', icon: <List />, description: 'Used addresses' },
@@ -58,11 +58,8 @@ const Sidebar = ({ activeTab, onTabChange, collapsed, onToggleCollapse, mobileMe
                 <Activity className="stat-icon" />
                 <div className="stat-info">
                   <span className="stat-label">Status</span>
-                  <span className="stat-value">Active</span>
+                  <span className="stat-value">{hasConflicts ? 'Conflicts' : 'Active'}</span>
                 </div>
-              </div>
-              <div className="stat-item">
-              
               </div>
             </div>
           </div>
