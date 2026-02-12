@@ -258,8 +258,8 @@ const AllocatedIPs = ({ data }) => {
             </tr>
           </thead>
           <tbody>
-            {filteredAndSortedData.map((allocation) => (
-              <tr key={`${allocation.ip_address}-${allocation.cloud_name}-${allocation.pool_name}`}>
+            {filteredAndSortedData.map((allocation, index) => (
+              <tr key={`${index}-${allocation.ip_address}-${allocation.cloud_name}-${allocation.pool_name}`}>
                 <td>
                   <CopyableIP ip={allocation.ip_address} />
                 </td>
