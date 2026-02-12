@@ -13,13 +13,15 @@ from pathlib import Path
 import http.client
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
+import sqlite3
+import json
 
 # Увеличиваем лимит заголовков для обработки больших ответов от VCD
 http.client._MAXHEADERS = 1000
 
 from vcd_client import VCDClient
 from ip_calculator import IPCalculator
-from models import DashboardData, CloudStats, IPPool, IPAllocation, IPConflict
+from models import DashboardData, CloudStats, IPPool, IPAllocation, IPConflict, Note, NoteCreate, NoteUpdate
 from keycloak_auth import (
     get_current_active_user,
     login_user,
@@ -49,6 +51,38 @@ LOCAL_TZ = pytz.timezone('Asia/Almaty')
 
 # Thread pool для блокирующих вызовов (Keycloak, VCD API)
 executor = ThreadPoolExecutor(max_workers=4)
+
+# ================== NOTES DATABASE ==================
+NOTES_DB_PATH = Path(__file__).parent / "notes.db"
+
+def init_notes_db():
+    """Инициализация SQLite базы данных для заметок"""
+    conn = sqlite3.connect(str(NOTES_DB_PATH))
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip_address TEXT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            author TEXT NOT NULL,
+            cloud_name TEXT,
+            pool_name TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+    logger.info("Notes database initialized")
+
+init_notes_db()
+
+def get_notes_db():
+    """Получить соединение к БД заметок"""
+    conn = sqlite3.connect(str(NOTES_DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # CORS — ограничиваем до фронтенд-домена
 ALLOWED_ORIGINS = os.getenv(
@@ -559,6 +593,182 @@ async def clear_cache(current_user: KeycloakUser = Depends(get_current_active_us
     except Exception as e:
         logger.error(f"Error clearing cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================== ЗАМЕТКИ (NOTES) ==================
+
+@app.get("/api/notes", response_model=List[Note])
+async def get_notes(
+    ip_address: Optional[str] = Query(None),
+    cloud_name: Optional[str] = Query(None),
+    pool_name: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user: KeycloakUser = Depends(get_current_active_user)
+):
+    """Получить список заметок с фильтрацией"""
+    conn = get_notes_db()
+    try:
+        query = "SELECT * FROM notes WHERE 1=1"
+        params = []
+
+        if ip_address:
+            query += " AND ip_address = ?"
+            params.append(ip_address)
+        if cloud_name:
+            query += " AND cloud_name = ?"
+            params.append(cloud_name)
+        if pool_name:
+            query += " AND pool_name = ?"
+            params.append(pool_name)
+        if search:
+            query += " AND (title LIKE ? OR content LIKE ? OR ip_address LIKE ?)"
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param, search_param])
+
+        query += " ORDER BY updated_at DESC"
+
+        cursor = conn.execute(query, params)
+        rows = cursor.fetchall()
+
+        return [
+            Note(
+                id=row["id"],
+                ip_address=row["ip_address"],
+                title=row["title"],
+                content=row["content"],
+                author=row["author"],
+                cloud_name=row["cloud_name"],
+                pool_name=row["pool_name"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"]
+            )
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+@app.post("/api/notes", response_model=Note)
+async def create_note(
+    note: NoteCreate,
+    current_user: KeycloakUser = Depends(get_current_active_user)
+):
+    """Создать новую заметку"""
+    conn = get_notes_db()
+    try:
+        now = get_local_time().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO notes (ip_address, title, content, author, cloud_name, pool_name, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (note.ip_address, note.title, note.content, current_user.username,
+             note.cloud_name, note.pool_name, now, now)
+        )
+        conn.commit()
+        note_id = cursor.lastrowid
+
+        logger.info(f"Note #{note_id} created by {current_user.username}")
+
+        return Note(
+            id=note_id,
+            ip_address=note.ip_address,
+            title=note.title,
+            content=note.content,
+            author=current_user.username,
+            cloud_name=note.cloud_name,
+            pool_name=note.pool_name,
+            created_at=now,
+            updated_at=now
+        )
+    finally:
+        conn.close()
+
+
+@app.put("/api/notes/{note_id}", response_model=Note)
+async def update_note(
+    note_id: int,
+    note_update: NoteUpdate,
+    current_user: KeycloakUser = Depends(get_current_active_user)
+):
+    """Обновить заметку"""
+    conn = get_notes_db()
+    try:
+        cursor = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Note not found")
+
+        now = get_local_time().isoformat()
+        updates = []
+        params = []
+
+        if note_update.title is not None:
+            updates.append("title = ?")
+            params.append(note_update.title)
+        if note_update.content is not None:
+            updates.append("content = ?")
+            params.append(note_update.content)
+        if note_update.ip_address is not None:
+            updates.append("ip_address = ?")
+            params.append(note_update.ip_address)
+        if note_update.cloud_name is not None:
+            updates.append("cloud_name = ?")
+            params.append(note_update.cloud_name)
+        if note_update.pool_name is not None:
+            updates.append("pool_name = ?")
+            params.append(note_update.pool_name)
+
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(note_id)
+
+            conn.execute(
+                f"UPDATE notes SET {', '.join(updates)} WHERE id = ?",
+                params
+            )
+            conn.commit()
+
+        cursor = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
+        row = cursor.fetchone()
+
+        logger.info(f"Note #{note_id} updated by {current_user.username}")
+
+        return Note(
+            id=row["id"],
+            ip_address=row["ip_address"],
+            title=row["title"],
+            content=row["content"],
+            author=row["author"],
+            cloud_name=row["cloud_name"],
+            pool_name=row["pool_name"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"]
+        )
+    finally:
+        conn.close()
+
+
+@app.delete("/api/notes/{note_id}")
+async def delete_note(
+    note_id: int,
+    current_user: KeycloakUser = Depends(get_current_active_user)
+):
+    """Удалить заметку"""
+    conn = get_notes_db()
+    try:
+        cursor = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Note not found")
+
+        conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        conn.commit()
+
+        logger.info(f"Note #{note_id} deleted by {current_user.username}")
+
+        return {"message": f"Note #{note_id} deleted successfully"}
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

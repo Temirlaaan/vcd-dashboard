@@ -1,6 +1,7 @@
 // frontend/src/components/ConflictAlert.jsx
 import React from 'react';
 import { AlertTriangle, X, Globe, Server } from 'lucide-react';
+import CopyableIP from './CopyableIP';
 import './ConflictAlert.css';
 
 const ConflictAlert = ({ conflicts, onClose }) => {
@@ -30,7 +31,7 @@ const ConflictAlert = ({ conflicts, onClose }) => {
           <div key={ip} className="conflict-item">
             <div className="conflict-ip">
               <Server className="ip-icon" />
-              <span className="ip-address">{ip}</span>
+              <CopyableIP ip={ip} />
             </div>
             
             {conflictList.map((conflict, idx) => (

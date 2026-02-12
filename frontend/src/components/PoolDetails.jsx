@@ -1,6 +1,7 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Database, TrendingUp, TrendingDown } from 'lucide-react';
+import CopyableIP from './CopyableIP';
 import './PoolDetails.css';
 
 const PoolDetails = ({ data }) => {
@@ -68,7 +69,7 @@ const PoolDetails = ({ data }) => {
                     <tr key={`${cloud.cloud_name}-${pool.name}`}>
                       <td className="pool-name-cell">{pool.name}</td>
                       <td>
-                        <span className="network-badge">{pool.network}</span>
+                        <CopyableIP ip={pool.network} />
                       </td>
                       <td className="number-cell">{pool.total_ips}</td>
                       <td className="number-cell">{pool.used_ips}</td>
