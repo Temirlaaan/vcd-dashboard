@@ -9,10 +9,11 @@ import Overview from './components/Overview';
 import AllocatedIPs from './components/AllocatedIPs';
 import FreeIPs from './components/FreeIPs';
 import PoolDetails from './components/PoolDetails';
+import Notes from './components/Notes';
 import ConflictAlert from './components/ConflictAlert';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
-import { RefreshCw, Menu, X, AlertTriangle, LogOut, User } from 'lucide-react';
+import { RefreshCw, Menu, X, AlertTriangle, LogOut, User, Moon, Sun } from 'lucide-react';
 import { formatTime } from './utils/dateUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -29,6 +30,15 @@ function App() {
   const [showConflicts, setShowConflicts] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [refreshToken, setRefreshToken] = useState(null);
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark';
+  });
+
+  // Apply dark mode
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    localStorage.setItem('theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   // Настройка axios с токеном
   const setupAxios = useCallback((token) => {
@@ -199,6 +209,8 @@ function App() {
         return <FreeIPs data={dashboardData} />;
       case 'pools':
         return <PoolDetails data={dashboardData} />;
+      case 'notes':
+        return <Notes data={dashboardData} />;
       default:
         return <Overview data={dashboardData} />;
     }
@@ -250,6 +262,13 @@ function App() {
             </div>
           </div>
           <div className="header-right">
+            <button
+              className="theme-toggle"
+              onClick={() => setDarkMode(!darkMode)}
+              title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
             {hasConflicts && (
               <button
                 className="conflict-indicator"

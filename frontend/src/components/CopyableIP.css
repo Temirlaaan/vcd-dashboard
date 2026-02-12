@@ -1,0 +1,51 @@
+.copyable-ip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Courier New', monospace;
+  background: var(--background);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  user-select: none;
+}
+
+.copyable-ip:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.copyable-ip:hover .copyable-ip-icon {
+  opacity: 1;
+  color: white;
+}
+
+.copyable-ip.copied {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.copyable-ip.copied .copyable-ip-icon {
+  opacity: 1;
+  color: white;
+}
+
+.copyable-ip-text {
+  line-height: 1;
+}
+
+.copyable-ip-icon {
+  opacity: 0;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+
+.copyable-ip:hover .copyable-ip-icon,
+.copyable-ip.copied .copyable-ip-icon {
+  opacity: 1;
+}

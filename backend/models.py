@@ -61,3 +61,34 @@ class DashboardData(BaseModel):
     clouds: List[CloudStats]
     all_allocations: List[IPAllocation]
     conflicts: Dict[str, List[IPConflict]] = {}  # IP -> список конфликтов
+
+
+class Note(BaseModel):
+    """Модель для заметки"""
+    id: Optional[int] = None
+    ip_address: Optional[str] = None
+    title: str
+    content: str
+    author: str
+    cloud_name: Optional[str] = None
+    pool_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class NoteCreate(BaseModel):
+    """Модель для создания заметки"""
+    ip_address: Optional[str] = None
+    title: str
+    content: str
+    cloud_name: Optional[str] = None
+    pool_name: Optional[str] = None
+
+
+class NoteUpdate(BaseModel):
+    """Модель для обновления заметки"""
+    ip_address: Optional[str] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    cloud_name: Optional[str] = None
+    pool_name: Optional[str] = None

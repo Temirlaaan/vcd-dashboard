@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cloud, Eye, List, Grid, Database, ChevronLeft, ChevronRight, Activity, X } from 'lucide-react';
+import { Cloud, Eye, List, Grid, Database, StickyNote, ChevronLeft, ChevronRight, Activity, X } from 'lucide-react';
 import './Sidebar.css';
 
 const Sidebar = ({ activeTab, onTabChange, collapsed, onToggleCollapse, mobileMenuOpen, onCloseMobile, hasConflicts }) => {
@@ -7,7 +7,8 @@ const Sidebar = ({ activeTab, onTabChange, collapsed, onToggleCollapse, mobileMe
     { id: 'overview', label: 'Overview', icon: <Eye />, description: 'General statistics' },
     { id: 'allocations', label: 'Allocated IPs', icon: <List />, description: 'Used addresses' },
     { id: 'free', label: 'Free IPs', icon: <Grid />, description: 'Available pool' },
-    { id: 'pools', label: 'Pool Details', icon: <Database />, description: 'Detailed analysis' }
+    { id: 'pools', label: 'Pool Details', icon: <Database />, description: 'Detailed analysis' },
+    { id: 'notes', label: 'Notes', icon: <StickyNote />, description: 'IP observations' }
   ];
 
   return (

@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Filter, Download } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Search, Filter, Download, ChevronDown } from 'lucide-react';
+import CopyableIP from './CopyableIP';
 import './AllocatedIPs.css';
 
 const AllocatedIPs = ({ data }) => {
@@ -7,11 +8,24 @@ const AllocatedIPs = ({ data }) => {
   const [cloudFilter, setCloudFilter] = useState('all');
   const [sortField, setSortField] = useState('ip_address');
   const [sortDirection, setSortDirection] = useState('asc');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportPoolFilter, setExportPoolFilter] = useState('all');
+  const exportMenuRef = useRef(null);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const filteredAndSortedData = useMemo(() => {
     let filtered = [...data.all_allocations];
 
-    // Apply search filter
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter(item =>
@@ -22,12 +36,10 @@ const AllocatedIPs = ({ data }) => {
       );
     }
 
-    // Apply cloud filter
     if (cloudFilter !== 'all') {
       filtered = filtered.filter(item => item.cloud_name === cloudFilter);
     }
 
-    // Apply sorting
     filtered.sort((a, b) => {
       let aVal = a[sortField] ?? '';
       let bVal = b[sortField] ?? '';
@@ -52,41 +64,132 @@ const AllocatedIPs = ({ data }) => {
     }
   };
 
-  const exportToCSV = () => {
-    const headers = ['IP Address', 'Organization', 'Cloud', 'Pool', 'Type', 'Entity'];
-    const rows = filteredAndSortedData.map(item => [
-      item.ip_address,
-      item.org_name,
-      item.cloud_name,
-      item.pool_name,
-      item.allocation_type,
-      item.entity_name || ''
-    ]);
+  const escapeCell = (cell) => `"${String(cell).replace(/"/g, '""')}"`;
 
-    const escapeCell = (cell) => `"${String(cell).replace(/"/g, '""')}"`;
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(escapeCell).join(','))
-    ].join('\n');
-
+  const downloadCSV = (csvContent, filename) => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `allocated_ips_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = filename;
     a.click();
     window.URL.revokeObjectURL(url);
   };
+
+  const exportAllocatedCSV = () => {
+    const headers = ['IP Address', 'Organization', 'Cloud', 'Pool', 'Type', 'Entity'];
+    const rows = filteredAndSortedData.map(item => [
+      item.ip_address, item.org_name, item.cloud_name, item.pool_name,
+      item.allocation_type, item.entity_name || ''
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.map(escapeCell).join(','))].join('\n');
+    const suffix = cloudFilter !== 'all' ? `_${cloudFilter}` : '';
+    downloadCSV(csvContent, `allocated_ips${suffix}_${new Date().toISOString().split('T')[0]}.csv`);
+    setShowExportMenu(false);
+  };
+
+  const exportFreeCSV = () => {
+    const headers = ['IP Address', 'Cloud', 'Pool', 'Network'];
+    const rows = [];
+
+    data.clouds.forEach(cloud => {
+      if (cloudFilter !== 'all' && cloud.cloud_name !== cloudFilter) return;
+      cloud.pools.forEach(pool => {
+        if (exportPoolFilter !== 'all' && pool.name !== exportPoolFilter) return;
+        pool.free_addresses.forEach(ip => {
+          rows.push([ip, cloud.cloud_name, pool.name, pool.network]);
+        });
+      });
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.map(escapeCell).join(','))].join('\n');
+    const suffix = cloudFilter !== 'all' ? `_${cloudFilter}` : '';
+    downloadCSV(csvContent, `free_ips${suffix}_${new Date().toISOString().split('T')[0]}.csv`);
+    setShowExportMenu(false);
+  };
+
+  const exportAllCSV = () => {
+    const headers = ['IP Address', 'Status', 'Organization', 'Cloud', 'Pool', 'Network', 'Type', 'Entity'];
+    const rows = [];
+
+    // Add allocated
+    filteredAndSortedData.forEach(item => {
+      rows.push([item.ip_address, 'Allocated', item.org_name, item.cloud_name,
+        item.pool_name, '', item.allocation_type, item.entity_name || '']);
+    });
+
+    // Add free
+    data.clouds.forEach(cloud => {
+      if (cloudFilter !== 'all' && cloud.cloud_name !== cloudFilter) return;
+      cloud.pools.forEach(pool => {
+        if (exportPoolFilter !== 'all' && pool.name !== exportPoolFilter) return;
+        pool.free_addresses.forEach(ip => {
+          rows.push([ip, 'Free', '', cloud.cloud_name, pool.name, pool.network, '', '']);
+        });
+      });
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.map(escapeCell).join(','))].join('\n');
+    const suffix = cloudFilter !== 'all' ? `_${cloudFilter}` : '';
+    downloadCSV(csvContent, `all_ips${suffix}_${new Date().toISOString().split('T')[0]}.csv`);
+    setShowExportMenu(false);
+  };
+
+  // Get available pools for current cloud filter
+  const availablePools = useMemo(() => {
+    const pools = [];
+    data.clouds.forEach(cloud => {
+      if (cloudFilter !== 'all' && cloud.cloud_name !== cloudFilter) return;
+      cloud.pools.forEach(pool => {
+        pools.push({ name: pool.name, cloud: cloud.cloud_name });
+      });
+    });
+    return pools;
+  }, [data.clouds, cloudFilter]);
 
   return (
     <div className="allocated-ips-container">
       <div className="section-header">
         <h2>Allocated IP Addresses</h2>
-        <button className="export-button" onClick={exportToCSV}>
-          <Download size={16} />
-          Export CSV
-        </button>
+        <div className="export-dropdown" ref={exportMenuRef}>
+          <button className="export-button" onClick={() => setShowExportMenu(!showExportMenu)}>
+            <Download size={16} />
+            Export CSV
+            <ChevronDown size={14} />
+          </button>
+          {showExportMenu && (
+            <div className="export-menu">
+              <div className="export-menu-filter">
+                <label>Pool filter:</label>
+                <select
+                  value={exportPoolFilter}
+                  onChange={(e) => setExportPoolFilter(e.target.value)}
+                >
+                  <option value="all">All Pools</option>
+                  {availablePools.map(pool => (
+                    <option key={`${pool.cloud}-${pool.name}`} value={pool.name}>
+                      {pool.cloud.toUpperCase()} - {pool.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button className="export-menu-item" onClick={exportAllocatedCSV}>
+                <Download size={14} />
+                Allocated IPs
+                <span className="export-count">{filteredAndSortedData.length}</span>
+              </button>
+              <button className="export-menu-item" onClick={exportFreeCSV}>
+                <Download size={14} />
+                Free IPs
+              </button>
+              <button className="export-menu-item" onClick={exportAllCSV}>
+                <Download size={14} />
+                All IPs (Allocated + Free)
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="filters-section">
@@ -105,7 +208,7 @@ const AllocatedIPs = ({ data }) => {
           <Filter className="filter-icon" />
           <select
             value={cloudFilter}
-            onChange={(e) => setCloudFilter(e.target.value)}
+            onChange={(e) => { setCloudFilter(e.target.value); setExportPoolFilter('all'); }}
             className="filter-select"
           >
             <option value="all">All Clouds</option>
@@ -158,7 +261,7 @@ const AllocatedIPs = ({ data }) => {
             {filteredAndSortedData.map((allocation) => (
               <tr key={`${allocation.ip_address}-${allocation.cloud_name}-${allocation.pool_name}`}>
                 <td>
-                  <span className="ip-address">{allocation.ip_address}</span>
+                  <CopyableIP ip={allocation.ip_address} />
                 </td>
                 <td>
                   <span className="org-name">{allocation.org_name}</span>

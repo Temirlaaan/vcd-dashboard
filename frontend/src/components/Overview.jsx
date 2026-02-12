@@ -1,6 +1,7 @@
 import React from 'react';
 import { Cloud } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import CopyableIP from './CopyableIP';
 import './Overview.css';
 
 const Overview = ({ data }) => {
@@ -73,7 +74,7 @@ const Overview = ({ data }) => {
                   <div key={`${cloud.cloud_name}-${pool.name}`} className="pool-item">
                     <div className="pool-info">
                       <div className="pool-name">{pool.name}</div>
-                      <div className="pool-network">{pool.network}</div>
+                      <div className="pool-network"><CopyableIP ip={pool.network} /></div>
                     </div>
                     <div className="pool-usage">
                       <div className="usage-bar">
